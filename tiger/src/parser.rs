@@ -28,3 +28,36 @@
  * &
  * |
  */
+
+/*
+ * TODO: for the recursive descent parser, one idea to workaround the borrow checker is to match
+ * the next (peeked) token and return the next method to call, then call this method after the
+ * match.
+ */
+
+use std::io::Read;
+
+use lexer::Lexer;
+
+pub struct Parser<R: Read> {
+    lexer: Lexer<R>,
+}
+
+impl<R: Read> Parser<R> {
+    pub fn new(lexer: Lexer<R>) -> Self {
+        Parser {
+            lexer,
+        }
+    }
+}
+
+        /*loop {
+            match lexer.token() {
+                Ok(token) => println!("{:?}", token),
+                Err(Eof) => break,
+                Err(error) => {
+                    println!("{}", error);
+                    break;
+                },
+            }
+        }*/

@@ -19,32 +19,15 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::env;
-use std::fs::File;
-use std::io::{self, BufReader};
-
-mod ast;
-mod error;
-mod lexer;
-mod parser;
-mod position;
-mod symbol;
-mod token;
-
-use lexer::Lexer;
-use parser::Parser;
-
-fn main() {
-    drive().unwrap();
+#[derive(Debug)]
+pub struct Symbol {
+    string: String,
 }
 
-fn drive() -> Result<(), io::Error> {
-    let mut args = env::args();
-    args.next();
-    if let Some(filename) = args.next() {
-        let file = BufReader::new(File::open(filename)?);
-        let lexer = Lexer::new(file);
-        let parser = Parser::new(lexer);
+impl Symbol {
+    pub fn new(string: &str) -> Self {
+        Symbol {
+            string: string.to_string(),
+        }
     }
-    Ok(())
 }
