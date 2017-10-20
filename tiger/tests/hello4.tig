@@ -1,0 +1,20 @@
+( variable
+; -variable[0]
+; MyRecord {
+    myField = 10
+}
+; MyRecord
+    { myField = 10
+    , secondField = 42
+    }
+; variable := 10
+; variable[42] := 10
+; if 10 then print("10")
+; if 10 then print("10") else print("not 10")
+; while 10 do (
+      print("10");
+      break
+  )
+; for i := 0 to 10 do
+      print(i)
+)

@@ -7,7 +7,7 @@ let type any = {any: int}
                 ord(buffer) >= ord("0") & ord(buffer) <= ord("9")
         in
             while buffer = " " | buffer = "\n" do
-                buffer := getchar()
+                buffer := getchar();
             any.any := isdigit(buffer);
             while isdigit(buffer) do (
                 i := i * 10 + ord(buffer) - ord("0");
@@ -19,8 +19,8 @@ let type any = {any: int}
     type list = {first: int, rest: list}
 
     function readlist() : list =
-        let var any = any { any = 0 }
-            var i = readint(any)
+        let var any := any { any = 0 }
+            var i := readint(any)
         in
             if any.any then
                 list { first = i, rest = readlist() }

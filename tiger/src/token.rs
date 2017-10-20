@@ -19,9 +19,11 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+use std::fmt::{self, Display, Formatter};
+
 use position::Pos;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Tok {
     Ampersand,
     Array,
@@ -72,4 +74,10 @@ pub enum Tok {
 pub struct Token {
     pub start: Pos,
     pub token: Tok,
+}
+
+impl Display for Tok {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "token")
+    }
 }

@@ -1,0 +1,22 @@
+let function hello() = print("Hello, World!\n")
+    var num := 42
+    var num: int := 42
+    type myNum = int
+    type myArray = array of myNum
+    type myStruct = {
+        myNum: int
+    }
+    type myStruct2 = {
+        myNum2: int,
+        myString: string
+    }
+    function myFunc(myParam: int) = print("Hello myParam\n")
+    function id(myParam: int): int = myParam
+    function const(param: int, other: int) = param
+    var myNull := nil
+    var indexing := myArray[0]
+    var indexing := myArray[myNum][0]
+    var fielding := myStruct.myNum
+    var fielding := myStruct2.myString.len
+    var both := myArray[0].myString[1]
+in hello() end

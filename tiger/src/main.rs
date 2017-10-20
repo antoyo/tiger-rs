@@ -44,7 +44,9 @@ fn drive() -> Result<(), io::Error> {
     if let Some(filename) = args.next() {
         let file = BufReader::new(File::open(filename)?);
         let lexer = Lexer::new(file);
-        let parser = Parser::new(lexer);
+        let mut parser = Parser::new(lexer);
+        let ast = parser.parse();
+        println!("{:#?}", ast);
     }
     Ok(())
 }

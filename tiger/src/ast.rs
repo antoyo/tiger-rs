@@ -41,7 +41,7 @@ pub enum Declaration {
 
 #[derive(Debug)]
 pub enum Expr {
-    ArrayExpr {
+    Array {
         init: Box<Expr>,
         pos: Pos,
         size: Box<Expr>,
@@ -49,7 +49,6 @@ pub enum Expr {
     },
     Assign {
         expr: Box<Expr>,
-        pos: Pos,
         var: Var,
     },
     Break(Pos),
@@ -72,7 +71,10 @@ pub enum Expr {
         test: Box<Expr>,
         then: Box<Expr>,
     },
-    Int(i64),
+    Int {
+        pos: Pos,
+        value: i64,
+    },
     Let {
         body: Box<Expr>,
         declarations: Vec<Declaration>,
@@ -82,15 +84,15 @@ pub enum Expr {
     Oper {
         left: Box<Expr>,
         oper: Operator,
-        pos: Pos,
+        oper_pos: Pos,
         right: Box<Expr>,
     },
-    RecordExpr {
+    Record {
         fields: Vec<RecordField>,
         pos: Pos,
         typ: Symbol,
     },
-    Sequence(Vec<ExprPos>),
+    Sequence(Vec<Expr>),
     Str {
         pos: Pos,
         value: String,
@@ -104,36 +106,31 @@ pub enum Expr {
 }
 
 #[derive(Debug)]
-pub struct ExprPos {
-    expr: Expr,
-    pos: Pos,
-}
-
-#[derive(Debug)]
 pub struct Field {
-    escape: bool,
-    name: Symbol,
-    pos: Pos,
-    typ: Symbol,
+    pub escape: bool,
+    pub name: Symbol,
+    pub pos: Pos,
+    pub typ: Symbol,
 }
 
 #[derive(Debug)]
 pub struct FuncDeclaration {
-    body: Expr,
-    name: Symbol,
-    params: Vec<Field>,
-    pos: Pos,
-    result: Option<Ident>,
+    pub body: Expr,
+    pub name: Symbol,
+    pub params: Vec<Field>,
+    pub pos: Pos,
+    pub result: Option<Ident>,
 }
 
 #[derive(Debug)]
 pub struct Ident {
-    ident: Symbol,
-    pos: Pos,
+    pub ident: Symbol,
+    pub pos: Pos,
 }
 
 #[derive(Debug)]
 pub enum Operator {
+    And,
     Divide,
     Equal,
     Ge,
@@ -142,15 +139,16 @@ pub enum Operator {
     Lt,
     Minus,
     Neq,
+    Or,
     Plus,
     Times,
 }
 
 #[derive(Debug)]
 pub struct RecordField {
-    expr: Expr,
-    ident: Symbol,
-    pos: Pos,
+    pub expr: Expr,
+    pub ident: Symbol,
+    pub pos: Pos,
 }
 
 #[derive(Debug)]
@@ -163,14 +161,16 @@ pub enum Ty {
         ident: Symbol,
         pos: Pos,
     },
-    Record(Vec<Field>),
+    Record {
+        fields: Vec<Field>,
+        pos: Pos,
+    },
 }
 
 #[derive(Debug)]
 pub enum Var {
     Field {
         ident: Symbol,
-        pos: Pos,
         this: Box<Var>,
     },
     Simple {
@@ -179,7 +179,6 @@ pub enum Var {
     },
     Subscript {
         expr: Box<Expr>,
-        pos: Pos,
         this: Box<Var>,
     },
 }

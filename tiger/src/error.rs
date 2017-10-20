@@ -25,9 +25,11 @@ use std::result;
 
 use position::Pos;
 use self::Error::*;
+use token::Tok;
 
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(Clone, Debug)]
 pub enum Error {
     Eof,
     InvalidEscape {
@@ -38,6 +40,11 @@ pub enum Error {
     Unclosed {
         pos: Pos,
         token: &'static str,
+    },
+    UnexpectedToken {
+        expected: String,
+        pos: Pos,
+        unexpected: Tok,
     },
     UnknownToken {
         pos: Pos,
@@ -53,6 +60,9 @@ impl Display for Error {
             Msg(ref string) => write!(formatter, "{}", string),
             Unclosed { ref pos, ref token } =>
                 write!(formatter, "Unclosed {} starting at line {}, column {}", token, pos.line, pos.column),
+            UnexpectedToken { ref expected, ref pos, ref unexpected } =>
+                write!(formatter, "Unexpected token {}, expecting {} at line {}, column {}", unexpected, expected,
+                       pos.line, pos.column),
             UnknownToken { ref pos, ref start } =>
                 write!(formatter, "{} Unexpected start of token `{}`", pos, start),
         }
@@ -62,5 +72,11 @@ impl Display for Error {
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
         Msg(error.to_string())
+    }
+}
+
+impl<'a> From<&'a Error> for Error {
+    fn from(error: &'a Error) -> Self {
+        error.clone()
     }
 }
