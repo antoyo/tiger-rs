@@ -26,25 +26,76 @@ use std::result;
 use position::Pos;
 use self::Error::*;
 use token::Tok;
+use types::Type;
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Vec<Error>>;
 
 #[derive(Clone, Debug)]
 pub enum Error {
+    BreakOutsideLoop {
+        pos: Pos,
+    },
+    CannotIndex {
+        pos: Pos,
+        typ: String,
+    },
+    Cycle {
+        pos: Pos,
+    },
+    DuplicateParam {
+        ident: String,
+        pos: Pos,
+    },
     Eof,
+    ExtraField {
+        ident: String,
+        pos: Pos,
+        struct_name: String,
+    },
     InvalidEscape {
         escape: String,
         pos: Pos,
     },
+    MissingField {
+        ident: String,
+        pos: Pos,
+        struct_name: String,
+    },
     Msg(String),
+    NotARecord {
+        pos: Pos,
+        typ: String,
+    },
+    RecordType {
+        pos: Pos,
+    },
+    Type {
+        expected: Type,
+        pos: Pos,
+        unexpected: Type,
+    },
     Unclosed {
         pos: Pos,
         token: &'static str,
+    },
+    Undefined {
+        ident: String,
+        item: String,
+        pos: Pos,
+    },
+    UnexpectedField {
+        ident: String,
+        pos: Pos,
+        struct_name: String,
     },
     UnexpectedToken {
         expected: String,
         pos: Pos,
         unexpected: Tok,
+    },
+    UnexpectedType {
+        kind: String,
+        pos: Pos,
     },
     UnknownToken {
         pos: Pos,
@@ -55,16 +106,40 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match *self {
+            BreakOutsideLoop { pos } =>
+                write!(formatter, "{} Break statement used outside of loop at {:?}", pos, pos),
+            CannotIndex { pos, ref typ } =>
+                write!(formatter, "{} Cannot index value of type `{}` at {:?}", pos, typ, pos),
+            Cycle { pos } =>
+                write!(formatter, "{} Type cycle detected at {:?}", pos, pos),
+            DuplicateParam { ref ident, pos } =>
+                write!(formatter, "{} Duplicate parameter name `{}` at {:?}", pos, ident, pos),
             Eof => write!(formatter, "end of file"),
-            InvalidEscape { ref escape, ref pos } => write!(formatter, "{} Invalid escape \\{}", pos, escape),
+            ExtraField { ref ident, pos, ref struct_name } =>
+                write!(formatter, "{} Extra field `{}` in struct of type `{}` at {:?}", pos, ident, struct_name, pos),
+            InvalidEscape { ref escape, pos } =>
+                write!(formatter, "{} Invalid escape \\{} at {:?}", pos, escape, pos),
+            MissingField { ref ident, pos, ref struct_name } =>
+                write!(formatter, "{} Missing field `{}` in struct of type `{}` at {:?}", pos, ident, struct_name, pos),
             Msg(ref string) => write!(formatter, "{}", string),
-            Unclosed { ref pos, ref token } =>
-                write!(formatter, "Unclosed {} starting at line {}, column {}", token, pos.line, pos.column),
-            UnexpectedToken { ref expected, ref pos, ref unexpected } =>
-                write!(formatter, "Unexpected token {}, expecting {} at line {}, column {}", unexpected, expected,
-                       pos.line, pos.column),
-            UnknownToken { ref pos, ref start } =>
-                write!(formatter, "{} Unexpected start of token `{}`", pos, start),
+            NotARecord { pos, ref typ } =>
+                write!(formatter, "{} Type `{}` is not a record type at {:?}", pos, typ, pos),
+            Error::RecordType { pos } =>
+                write!(formatter, "{} Expecting type when value is nil at {:?}", pos, pos),
+            Error::Type { ref expected, pos, ref unexpected } =>
+                write!(formatter, "{}, Unexpected type {}, expecting {} at {:?}", pos, unexpected, expected, pos),
+            Unclosed { pos, token } =>
+                write!(formatter, "{} Unclosed {} starting at {:?}", pos, token, pos),
+            Undefined { ref ident, ref item, pos } =>
+                write!(formatter, "{} Undefined {} `{}` at {:?}", pos, item, ident, pos),
+            UnexpectedField { ref ident, pos, ref struct_name } =>
+                write!(formatter, "{} Unexpected field `{}` in struct of type `{}` at {:?}", pos, ident, struct_name, pos),
+            UnexpectedToken { ref expected, pos, ref unexpected } =>
+                write!(formatter, "{} Unexpected token {}, expecting {} at {:?}", pos, unexpected, expected, pos),
+            UnexpectedType { ref kind, pos } =>
+                write!(formatter, "{} Expecting {} type at {:?}", pos, kind, pos),
+            UnknownToken { pos, ref start } =>
+                write!(formatter, "{} Unexpected start of token `{}` at {:?}", pos, start, pos),
         }
     }
 }

@@ -19,114 +19,99 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use position::Pos;
-use symbol::Symbol;
+use position::WithPos;
+use symbol::{Symbol, SymbolWithPos};
 
 #[derive(Debug)]
 pub enum Declaration {
-    Function(Vec<FuncDeclaration>),
-    Type {
-        name: Symbol,
-        pos: Pos,
-        ty: Ty,
-    },
+    Function(Vec<FuncDeclarationWithPos>),
+    Type(Vec<TypeDecWithPos>),
     VariableDeclaration {
         escape: bool,
-        init: Expr,
+        init: ExprWithPos,
         name: Symbol,
-        pos: Pos,
-        typ: Option<Ident>,
+        typ: Option<SymbolWithPos>,
     },
 }
+
+pub type DeclarationWithPos = WithPos<Declaration>;
 
 #[derive(Debug)]
 pub enum Expr {
     Array {
-        init: Box<Expr>,
-        pos: Pos,
-        size: Box<Expr>,
-        typ: Symbol,
+        init: Box<ExprWithPos>,
+        size: Box<ExprWithPos>,
+        typ: SymbolWithPos,
     },
     Assign {
-        expr: Box<Expr>,
-        var: Var,
+        expr: Box<ExprWithPos>,
+        var: VarWithPos,
     },
-    Break(Pos),
+    Break,
     Call {
-        args: Vec<Expr>,
+        args: Vec<ExprWithPos>,
         function: Symbol,
-        pos: Pos,
     },
     For {
-        body: Box<Expr>,
-        end: Box<Expr>,
+        body: Box<ExprWithPos>,
+        end: Box<ExprWithPos>,
         escape: bool,
-        pos: Pos,
-        start: Box<Expr>,
+        start: Box<ExprWithPos>,
         var: Symbol,
     },
     If {
-        else_: Option<Box<Expr>>,
-        pos: Pos,
-        test: Box<Expr>,
-        then: Box<Expr>,
+        else_: Option<Box<ExprWithPos>>,
+        test: Box<ExprWithPos>,
+        then: Box<ExprWithPos>,
     },
     Int {
-        pos: Pos,
         value: i64,
     },
     Let {
-        body: Box<Expr>,
-        declarations: Vec<Declaration>,
-        pos: Pos,
+        body: Box<ExprWithPos>,
+        declarations: Vec<DeclarationWithPos>,
     },
     Nil,
     Oper {
-        left: Box<Expr>,
-        oper: Operator,
-        oper_pos: Pos,
-        right: Box<Expr>,
+        left: Box<ExprWithPos>,
+        oper: OperatorWithPos,
+        right: Box<ExprWithPos>,
     },
     Record {
-        fields: Vec<RecordField>,
-        pos: Pos,
-        typ: Symbol,
+        fields: Vec<RecordFieldWithPos>,
+        typ: SymbolWithPos,
     },
-    Sequence(Vec<Expr>),
+    Sequence(Vec<ExprWithPos>),
     Str {
-        pos: Pos,
         value: String,
     },
-    Variable(Var),
+    Variable(VarWithPos),
     While {
-        body: Box<Expr>,
-        pos: Pos,
-        test: Box<Expr>,
+        body: Box<ExprWithPos>,
+        test: Box<ExprWithPos>,
     },
 }
+
+pub type ExprWithPos = WithPos<Expr>;
 
 #[derive(Debug)]
 pub struct Field {
     pub escape: bool,
     pub name: Symbol,
-    pub pos: Pos,
-    pub typ: Symbol,
+    pub typ: SymbolWithPos,
 }
+
+pub type FieldWithPos = WithPos<Field>;
 
 #[derive(Debug)]
 pub struct FuncDeclaration {
-    pub body: Expr,
+    pub body: ExprWithPos,
     pub name: Symbol,
-    pub params: Vec<Field>,
-    pub pos: Pos,
-    pub result: Option<Ident>,
+    pub params: Vec<FieldWithPos>,
+    pub result: Option<SymbolWithPos>,
 }
 
-#[derive(Debug)]
-pub struct Ident {
-    pub ident: Symbol,
-    pub pos: Pos,
-}
+pub type FuncDeclarationWithPos = WithPos<FuncDeclaration>;
 
 #[derive(Debug)]
 pub enum Operator {
@@ -144,41 +129,52 @@ pub enum Operator {
     Times,
 }
 
+pub type OperatorWithPos = WithPos<Operator>;
+
 #[derive(Debug)]
 pub struct RecordField {
-    pub expr: Expr,
+    pub expr: ExprWithPos,
     pub ident: Symbol,
-    pub pos: Pos,
 }
+
+pub type RecordFieldWithPos = WithPos<RecordField>;
 
 #[derive(Debug)]
 pub enum Ty {
     Array {
-        ident: Symbol,
-        pos: Pos,
+        ident: SymbolWithPos,
     },
     Name {
-        ident: Symbol,
-        pos: Pos,
+        ident: SymbolWithPos,
     },
     Record {
-        fields: Vec<Field>,
-        pos: Pos,
+        fields: Vec<FieldWithPos>,
     },
 }
 
 #[derive(Debug)]
+pub struct TypeDec {
+    pub name: SymbolWithPos,
+    pub ty: TyWithPos,
+}
+
+pub type TypeDecWithPos = WithPos<TypeDec>;
+
+pub type TyWithPos = WithPos<Ty>;
+
+#[derive(Debug)]
 pub enum Var {
     Field {
-        ident: Symbol,
-        this: Box<Var>,
+        ident: SymbolWithPos,
+        this: Box<VarWithPos>,
     },
     Simple {
         ident: Symbol,
-        pos: Pos,
     },
     Subscript {
-        expr: Box<Expr>,
-        this: Box<Var>,
+        expr: Box<ExprWithPos>,
+        this: Box<VarWithPos>,
     },
 }
+
+pub type VarWithPos = WithPos<Var>;

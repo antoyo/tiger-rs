@@ -34,21 +34,29 @@ use std::result;
 
 use ast::{
     Declaration,
+    DeclarationWithPos,
     Expr,
+    ExprWithPos,
     Field,
+    FieldWithPos,
     FuncDeclaration,
-    Ident,
+    FuncDeclarationWithPos,
     Operator,
     RecordField,
+    RecordFieldWithPos,
     Ty,
+    TypeDec,
+    TypeDecWithPos,
+    TyWithPos,
     Var,
+    VarWithPos,
 };
 use ast::Declaration::VariableDeclaration;
-use error::{Error, Result};
+use error::Error;
 use error::Error::UnexpectedToken;
 use lexer::Lexer;
-use position::Pos;
-use symbol::Symbol;
+use position::{Pos, WithPos};
+use symbol::{Symbols, SymbolWithPos};
 use token::{Tok, Token};
 use token::Tok::*;
 
@@ -100,60 +108,63 @@ macro_rules! fields {
     };
 }
 
-pub struct Parser<R: Read> {
+pub type Result<T> = result::Result<T, Error>;
+
+pub struct Parser<'a, R: Read> {
     lexer: Lexer<R>,
     lookahead: Option<Result<Token>>,
+    symbols: &'a mut Symbols<()>,
 }
 
-impl<R: Read> Parser<R> {
-    pub fn new(lexer: Lexer<R>) -> Self {
+impl<'a, R: Read> Parser<'a, R> {
+    pub fn new(lexer: Lexer<R>, symbols: &'a mut Symbols<()>) -> Self {
         Parser {
             lexer,
             lookahead: None,
+            symbols,
         }
     }
 
-    fn additive_expr(&mut self) -> Result<Expr> {
+    fn additive_expr(&mut self) -> Result<ExprWithPos> {
         let mut expr = self.multiplicative_expr()?;
         loop {
-            let (oper_pos, oper) =
+            let oper =
                 match self.peek_token() {
-                    Ok(&Minus) => (eat!(self, Minus), Operator::Minus),
-                    Ok(&Plus) => (eat!(self, Plus), Operator::Plus),
+                    Ok(&Minus) => WithPos::new(Operator::Minus, eat!(self, Minus)),
+                    Ok(&Plus) => WithPos::new(Operator::Plus, eat!(self, Plus)),
                     _ => break,
                 };
             let right = Box::new(self.multiplicative_expr()?);
-            expr = Expr::Oper {
+            let pos = expr.pos;
+            expr = WithPos::new(Expr::Oper {
                 left: Box::new(expr),
                 oper,
-                oper_pos,
                 right,
-            };
+            }, pos);
         }
         Ok(expr)
     }
 
-    fn arr_ty(&mut self) -> Result<Ty> {
+    fn arr_ty(&mut self) -> Result<TyWithPos> {
         let pos = eat!(self, Array);
         eat!(self, Of);
         let type_name;
-        eat!(self, Ident, type_name);
-        let ident = Symbol::new(&type_name);
-        Ok(Ty::Array {
-            ident,
-            pos,
-        })
+        let type_pos = eat!(self, Ident, type_name);
+        let ident = self.symbols.symbol(&type_name);
+        Ok(WithPos::new(Ty::Array {
+            ident: WithPos::new(ident, type_pos),
+        }, pos))
     }
 
-    fn break_(&mut self) -> Result<Expr> {
+    fn break_(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Break);
-        Ok(Expr::Break(pos))
+        Ok(WithPos::new(Expr::Break, pos))
     }
 
-    fn call_expr_or_other(&mut self) -> Result<Expr> {
+    fn call_expr_or_other(&mut self) -> Result<ExprWithPos> {
         let name;
         let pos = eat!(self, Ident, name);
-        let symbol = Symbol::new(&name);
+        let symbol = self.symbols.symbol(&name);
         if let OpenParen = self.peek()?.token {
             eat!(self, OpenParen);
             let mut args = vec![];
@@ -169,67 +180,64 @@ impl<R: Read> Parser<R> {
                 }
             }
             eat!(self, CloseParen);
-            Ok(Expr::Call {
+            Ok(WithPos::new(Expr::Call {
                 args,
                 function: symbol,
-                pos,
-            })
+            }, pos))
         }
         else {
             match self.peek()?.token {
-                OpenCurly => self.rec_create(symbol, pos),
+                OpenCurly => self.rec_create(WithPos::new(symbol, pos), pos),
                 _ => {
-                    let var = Var::Simple {
+                    let var = WithPos::new(Var::Simple {
                         ident: symbol,
-                        pos,
-                    };
+                    }, pos);
                     self.lvalue_or_assign(var)
                 }
             }
         }
     }
 
-    fn dec(&mut self) -> Result<Declaration> {
+    fn dec(&mut self) -> Result<DeclarationWithPos> {
         match self.peek()?.token {
-            Function => self.fun_dec(),
-            Type => self.ty_dec(),
+            Function => self.fun_decs(),
+            Type => self.ty_decs(),
             Var => self.var_dec(),
             _ => Err(self.unexpected_token("function, type or var")?),
         }
     }
 
-    fn expr(&mut self) -> Result<Expr> {
+    fn expr(&mut self) -> Result<ExprWithPos> {
         self.logical_or_expr()
     }
 
-    fn field_dec(&mut self) -> Result<Field> {
+    fn field_dec(&mut self) -> Result<FieldWithPos> {
         let field_name;
         let pos = eat!(self, Ident, field_name);
-        let name = Symbol::new(&field_name);
+        let name = self.symbols.symbol(&field_name);
         eat!(self, Colon);
         let type_name;
-        eat!(self, Ident, type_name);
-        let typ = Symbol::new(&type_name);
-        Ok(Field {
+        let type_pos = eat!(self, Ident, type_name);
+        let typ = self.symbols.symbol(&type_name);
+        Ok(WithPos::new(Field {
             escape: false,
             name,
-            pos,
-            typ,
-        })
+            typ: WithPos::new(typ, type_pos),
+        }, pos))
     }
 
-    fn field_exp(&mut self, var: Var) -> Result<Var> {
+    fn field_exp(&mut self, var: VarWithPos) -> Result<VarWithPos> {
         eat!(self, Dot);
         let field_name;
-        eat!(self, Ident, field_name);
-        let var = Var::Field {
-            ident: Symbol::new(&field_name),
+        let pos = eat!(self, Ident, field_name);
+        let var = WithPos::new(Var::Field {
+            ident: WithPos::new(self.symbols.symbol(&field_name), pos),
             this: Box::new(var),
-        };
+        }, pos);
         self.lvalue(var)
     }
 
-    fn fields(&mut self) -> Result<Vec<Field>> {
+    fn fields(&mut self) -> Result<Vec<FieldWithPos>> {
         let field = self.field_dec()?;
         let mut fields = vec![field];
         while let Comma = self.peek()?.token {
@@ -239,62 +247,68 @@ impl<R: Read> Parser<R> {
         Ok(fields)
     }
 
-    fn field_create(&mut self) -> Result<RecordField> {
+    fn field_create(&mut self) -> Result<RecordFieldWithPos> {
         let field_name;
         let pos = eat!(self, Ident, field_name);
-        let ident = Symbol::new(&field_name);
+        let ident = self.symbols.symbol(&field_name);
         eat!(self, Equal);
         let expr = self.expr()?;
-        Ok(RecordField {
+        Ok(WithPos::new(RecordField {
             expr,
             ident,
-            pos,
-        })
+        }, pos))
     }
 
-    fn for_loop(&mut self) -> Result<Expr> {
+    fn for_loop(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, For);
         let var_name;
         eat!(self, Ident, var_name);
-        let var = Symbol::new(&var_name);
+        let var = self.symbols.symbol(&var_name);
         eat!(self, ColonEqual);
         let start = Box::new(self.expr()?);
         eat!(self, To);
         let end = Box::new(self.expr()?);
         eat!(self, Do);
         let body = Box::new(self.expr()?);
-        Ok(Expr::For {
+        Ok(WithPos::new(Expr::For {
             body,
             end,
             escape: false,
-            pos,
             start,
             var,
-        })
+        }, pos))
     }
 
-    fn fun_dec(&mut self) -> Result<Declaration> {
+    fn fun_decs(&mut self) -> Result<DeclarationWithPos> {
+        let func = self.fun_dec()?;
+        let pos = func.pos;
+        let mut functions = vec![func];
+        while let Function = self.peek()?.token {
+            functions.push(self.fun_dec()?);
+        }
+        Ok(WithPos::new(Declaration::Function(functions), pos))
+    }
+
+    fn fun_dec(&mut self) -> Result<FuncDeclarationWithPos> {
         let pos = eat!(self, Function);
         let func_name;
         eat!(self, Ident, func_name);
-        let name = Symbol::new(&func_name);
+        let name = self.symbols.symbol(&func_name);
         eat!(self, OpenParen);
         let params = fields!(self, CloseParen);
         eat!(self, CloseParen);
         let result = self.optional_type()?;
         eat!(self, Equal);
         let body = self.expr()?;
-        let func = FuncDeclaration {
+        Ok(WithPos::new(FuncDeclaration {
             body,
             name,
             params,
-            pos,
             result,
-        };
-        Ok(Declaration::Function(vec![func]))
+        }, pos))
     }
 
-    fn if_then_else(&mut self) -> Result<Expr> {
+    fn if_then_else(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, If);
         let test = Box::new(self.expr()?);
         eat!(self, Then);
@@ -307,24 +321,22 @@ impl<R: Read> Parser<R> {
             else {
                 None
             };
-        Ok(Expr::If {
+        Ok(WithPos::new(Expr::If {
             else_,
-            pos,
             test,
             then,
-        })
+        }, pos))
     }
 
-    fn int_lit(&mut self) -> Result<Expr> {
+    fn int_lit(&mut self) -> Result<ExprWithPos> {
         let value;
         let pos = eat!(self, Int, value);
-        Ok(Expr::Int {
-            pos,
+        Ok(WithPos::new(Expr::Int {
             value,
-        })
+        }, pos))
     }
 
-    fn let_expr(&mut self) -> Result<Expr> {
+    fn let_expr(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Let);
         let mut declarations = vec![self.dec()?];
         loop {
@@ -341,44 +353,44 @@ impl<R: Read> Parser<R> {
             exprs.push(self.expr()?);
         }
         eat!(self, End);
-        Ok(Expr::Let {
-            body: Box::new(Expr::Sequence(exprs)),
+        let body_pos = exprs[0].pos;
+        Ok(WithPos::new(Expr::Let {
+            body: Box::new(WithPos::new(Expr::Sequence(exprs), body_pos)),
             declarations,
-            pos
-        })
+        }, pos))
     }
 
-    fn logical_and_expr(&mut self) -> Result<Expr> {
+    fn logical_and_expr(&mut self) -> Result<ExprWithPos> {
         let mut expr = self.relational_expr()?;
         while let Ok(&Ampersand) = self.peek_token() {
             let oper_pos = eat!(self, Ampersand);
             let right = Box::new(self.relational_expr()?);
-            expr = Expr::Oper {
+            let pos = expr.pos;
+            expr = WithPos::new(Expr::Oper {
                 left: Box::new(expr),
-                oper: Operator::And,
-                oper_pos,
+                oper: WithPos::new(Operator::And, oper_pos),
                 right,
-            };
+            }, pos);
         }
         Ok(expr)
     }
 
-    fn logical_or_expr(&mut self) -> Result<Expr> {
+    fn logical_or_expr(&mut self) -> Result<ExprWithPos> {
         let mut expr = self.logical_and_expr()?;
         while let Ok(&Pipe) = self.peek_token() {
             let oper_pos = eat!(self, Pipe);
             let right = Box::new(self.logical_and_expr()?);
-            expr = Expr::Oper {
+            let pos = expr.pos;
+            expr = WithPos::new(Expr::Oper {
                 left: Box::new(expr),
-                oper: Operator::Or,
-                oper_pos,
+                oper: WithPos::new(Operator::Or, oper_pos),
                 right,
-            };
+            }, pos);
         }
         Ok(expr)
     }
 
-    fn lvalue(&mut self, var: Var) -> Result<Var> {
+    fn lvalue(&mut self, var: VarWithPos) -> Result<VarWithPos> {
         match self.peek()?.token {
             OpenSquare => self.subscript(var),
             Dot => self.field_exp(var),
@@ -386,22 +398,20 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn lvalue_or_assign(&mut self, var: Var) -> Result<Expr> {
+    fn lvalue_or_assign(&mut self, var: VarWithPos) -> Result<ExprWithPos> {
         let var = self.lvalue(var)?;
         let value =
             if let Of = self.peek()?.token {
-                match var {
+                match var.node {
                     Var::Subscript { expr, this } => {
-                        let simple_var = *this;
-                        if let Var::Simple { ident, pos } = simple_var {
+                        if let Var::Simple { ident } = this.node {
                             eat!(self, Of);
                             let init = Box::new(self.expr()?);
-                            return Ok(Expr::Array {
+                            return Ok(WithPos::new(Expr::Array {
                                 init,
                                 size: expr,
-                                pos,
-                                typ: ident,
-                            });
+                                typ: WithPos::new(ident, this.pos),
+                            }, this.pos));
                         }
                         else {
                             return Err(self.unexpected_token("neither dot nor subscript")?);
@@ -416,57 +426,56 @@ impl<R: Read> Parser<R> {
         if let ColonEqual = self.peek()?.token {
             eat!(self, ColonEqual);
             let expr = Box::new(self.expr()?);
-            Ok(Expr::Assign {
+            let pos = expr.pos;
+            Ok(WithPos::new(Expr::Assign {
                 expr,
                 var: value,
-            })
+            }, pos))
         }
         else {
-            Ok(Expr::Variable(value))
+            let pos = value.pos;
+            Ok(WithPos::new(Expr::Variable(value), pos))
         }
     }
 
-    fn multiplicative_expr(&mut self) -> Result<Expr> {
+    fn multiplicative_expr(&mut self) -> Result<ExprWithPos> {
         let mut expr = self.unary_expr()?;
         loop {
-            let (oper_pos, oper) =
+            let oper =
                 match self.peek_token() {
-                    Ok(&Slash) => (eat!(self, Slash), Operator::Divide),
-                    Ok(&Star) => (eat!(self, Star), Operator::Times),
+                    Ok(&Slash) => WithPos::new(Operator::Divide, eat!(self, Slash)),
+                    Ok(&Star) => WithPos::new(Operator::Times, eat!(self, Star)),
                     _ => break,
                 };
             let right = Box::new(self.unary_expr()?);
-            expr = Expr::Oper {
+            let pos = expr.pos;
+            expr = WithPos::new(Expr::Oper {
                 left: Box::new(expr),
                 oper,
-                oper_pos,
                 right,
-            };
+            }, pos);
         }
         Ok(expr)
     }
 
-    fn nil(&mut self) -> Result<Expr> {
-        eat!(self, Nil);
-        Ok(Expr::Nil)
+    fn nil(&mut self) -> Result<ExprWithPos> {
+        let pos = eat!(self, Nil);
+        Ok(WithPos::new(Expr::Nil, pos))
     }
 
-    fn optional_type(&mut self) -> Result<Option<Ident>> {
+    fn optional_type(&mut self) -> Result<Option<SymbolWithPos>> {
         let mut typ = None;
         if let Colon = self.peek()?.token {
             eat!(self, Colon);
             let type_name;
             let pos = eat!(self, Ident, type_name);
-            let ident = Symbol::new(&type_name);
-            typ = Some(Ident {
-                ident,
-                pos,
-            });
+            let ident = self.symbols.symbol(&type_name);
+            typ = Some(WithPos::new(ident, pos));
         }
         Ok(typ)
     }
 
-    fn primary_expr(&mut self) -> Result<Expr> {
+    fn primary_expr(&mut self) -> Result<ExprWithPos> {
         match self.peek()?.token {
             Break => self.break_(),
             For => self.for_loop(),
@@ -482,7 +491,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn rec_create(&mut self, typ: Symbol, pos: Pos) -> Result<Expr> {
+    fn rec_create(&mut self, typ: SymbolWithPos, pos: Pos) -> Result<ExprWithPos> {
         eat!(self, OpenCurly);
         let field = self.field_create()?;
         let mut fields = vec![field];
@@ -491,48 +500,46 @@ impl<R: Read> Parser<R> {
             fields.push(self.field_create()?)
         }
         eat!(self, CloseCurly);
-        Ok(Expr::Record {
+        Ok(WithPos::new(Expr::Record {
             fields,
-            pos,
             typ,
-        })
+        }, pos))
     }
 
-    fn rec_ty(&mut self) -> Result<Ty> {
+    fn rec_ty(&mut self) -> Result<TyWithPos> {
         let pos = eat!(self, OpenCurly);
         let fields = fields!(self, CloseCurly);
         eat!(self, CloseCurly);
-        Ok(Ty::Record {
+        Ok(WithPos::new(Ty::Record {
             fields,
-            pos,
-        })
+        }, pos))
     }
 
-    fn relational_expr(&mut self) -> Result<Expr> {
+    fn relational_expr(&mut self) -> Result<ExprWithPos> {
         let mut expr = self.additive_expr()?;
         loop {
-            let (oper_pos, oper) =
+            let oper =
                 match self.peek_token() {
-                    Ok(&Equal) => (eat!(self, Equal), Operator::Equal),
-                    Ok(&Greater) => (eat!(self, Greater), Operator::Gt),
-                    Ok(&GreaterOrEqual) => (eat!(self, GreaterOrEqual), Operator::Ge),
-                    Ok(&Lesser) => (eat!(self, Lesser), Operator::Lt),
-                    Ok(&LesserOrEqual) => (eat!(self, LesserOrEqual), Operator::Le),
-                    Ok(&NotEqual) => (eat!(self, NotEqual), Operator::Neq),
+                    Ok(&Equal) => WithPos::new(Operator::Equal, eat!(self, Equal)),
+                    Ok(&Greater) => WithPos::new(Operator::Gt, eat!(self, Greater)),
+                    Ok(&GreaterOrEqual) => WithPos::new(Operator::Ge, eat!(self, GreaterOrEqual)),
+                    Ok(&Lesser) => WithPos::new(Operator::Lt, eat!(self, Lesser)),
+                    Ok(&LesserOrEqual) => WithPos::new(Operator::Le, eat!(self, LesserOrEqual)),
+                    Ok(&NotEqual) => WithPos::new(Operator::Neq, eat!(self, NotEqual)),
                     _ => break,
                 };
             let right = Box::new(self.additive_expr()?);
-            expr = Expr::Oper {
+            let pos = expr.pos;
+            expr = WithPos::new(Expr::Oper {
                 left: Box::new(expr),
                 oper,
-                oper_pos,
                 right,
-            };
+            }, pos);
         }
         Ok(expr)
     }
 
-    fn seq_exp(&mut self) -> Result<Expr> {
+    fn seq_exp(&mut self) -> Result<ExprWithPos> {
         eat!(self, OpenParen);
         let mut exprs = vec![self.expr()?];
         while let Semicolon = self.peek()?.token {
@@ -540,110 +547,114 @@ impl<R: Read> Parser<R> {
             exprs.push(self.expr()?);
         }
         eat!(self, CloseParen);
-        Ok(Expr::Sequence(exprs))
+        let pos = exprs[0].pos;
+        Ok(WithPos::new(Expr::Sequence(exprs), pos))
     }
 
-    fn string_lit(&mut self) -> Result<Expr> {
+    fn string_lit(&mut self) -> Result<ExprWithPos> {
         let value;
         let pos = eat!(self, Str, value);
-        Ok(Expr::Str {
-            pos,
+        Ok(WithPos::new(Expr::Str {
             value,
-        })
+        }, pos))
     }
 
-    fn subscript(&mut self, var: Var) -> Result<Var> {
+    fn subscript(&mut self, var: VarWithPos) -> Result<VarWithPos> {
         eat!(self, OpenSquare);
         let expr = Box::new(self.expr()?);
         eat!(self, CloseSquare);
-        let var = Var::Subscript {
+        let pos = var.pos;
+        let var = WithPos::new(Var::Subscript {
             expr,
             this: Box::new(var),
-        };
+        }, pos);
         self.lvalue(var)
     }
 
-    fn ty(&mut self) -> Result<Ty> {
+    fn ty(&mut self) -> Result<TyWithPos> {
         match self.peek()?.token {
             Array => self.arr_ty(),
             OpenCurly => self.rec_ty(),
             Ident(_) => {
                 let type_name;
                 let pos = eat!(self, Ident, type_name);
-                let ident = Symbol::new(&type_name);
-                Ok(Ty::Name {
-                    ident,
-                    pos,
-                })
+                let ident = self.symbols.symbol(&type_name);
+                Ok(WithPos::new(Ty::Name {
+                    ident: WithPos::new(ident, pos),
+                }, pos))
             },
             _ => Err(self.unexpected_token("array, { or identifier")?),
         }
     }
 
-    fn ty_dec(&mut self) -> Result<Declaration> {
-        let pos = eat!(self, Type);
-        let type_name;
-        eat!(self, Ident, type_name);
-        let name = Symbol::new(&type_name);
-        eat!(self, Equal);
-        let ty = self.ty()?;
-        Ok(Declaration::Type {
-            name,
-            pos,
-            ty,
-        })
+    fn ty_decs(&mut self) -> Result<DeclarationWithPos> {
+        let dec = self.ty_dec()?;
+        let pos = dec.pos;
+        let mut declarations = vec![dec];
+        while let Type = self.peek()?.token {
+            declarations.push(self.ty_dec()?);
+        }
+        Ok(WithPos::new(Declaration::Type(declarations), pos))
     }
 
-    fn unary_expr(&mut self) -> Result<Expr> {
+    fn ty_dec(&mut self) -> Result<TypeDecWithPos> {
+        let pos = eat!(self, Type);
+        let type_name;
+        let name_pos = eat!(self, Ident, type_name);
+        let name = self.symbols.symbol(&type_name);
+        eat!(self, Equal);
+        let ty = self.ty()?;
+        Ok(WithPos::new(TypeDec {
+            name: WithPos::new(name, name_pos),
+            ty,
+        }, pos))
+    }
+
+    fn unary_expr(&mut self) -> Result<ExprWithPos> {
         match self.peek()?.token {
             Minus => {
                 let pos = eat!(self, Minus);
-                let oper_pos = pos.clone();
                 let expr = self.unary_expr()?;
-                Ok(Expr::Oper {
-                    left: Box::new(Expr::Int {
-                        pos,
+                Ok(WithPos::new(Expr::Oper {
+                    left: Box::new(WithPos::new(Expr::Int {
                         value: 0,
-                    }),
-                    oper: Operator::Minus,
-                    oper_pos,
+                    }, pos)),
+                    oper: WithPos::new(Operator::Minus, pos),
                     right: Box::new(expr),
-                })
+                }, pos))
             },
             _ => self.primary_expr(),
         }
     }
 
-    fn var_dec(&mut self) -> Result<Declaration> {
+    fn var_dec(&mut self) -> Result<DeclarationWithPos> {
         let pos = eat!(self, Var);
         let var_name;
         eat!(self, Ident, var_name);
         let typ = self.optional_type()?;
-        let name = Symbol::new(&var_name);
+        let name = self.symbols.symbol(&var_name);
         eat!(self, ColonEqual);
         let init = self.expr()?;
-        Ok(VariableDeclaration {
+        Ok(WithPos::new(VariableDeclaration {
             escape: false,
             init,
             name,
-            pos,
             typ,
-        })
+        }, pos))
     }
 
-    fn while_loop(&mut self) -> Result<Expr> {
+    fn while_loop(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, While);
         let test = Box::new(self.expr()?);
         eat!(self, Do);
         let body = Box::new(self.expr()?);
-        Ok(Expr::While {
+        Ok(WithPos::new(Expr::While {
             body,
-            pos,
             test,
-        })
+        }, pos))
     }
 
-    pub fn parse(&mut self) -> Result<Expr> {
+    pub fn parse(&mut self) -> Result<ExprWithPos> {
         self.expr()
     }
 
@@ -670,21 +681,10 @@ impl<R: Read> Parser<R> {
 
     fn unexpected_token(&mut self, expected: &str) -> Result<Error> {
         let token = self.token()?;
-        return Err(UnexpectedToken {
+        Err(UnexpectedToken {
             expected: expected.to_string(),
             pos: token.start,
             unexpected: token.token,
-        });
+        })
     }
 }
-
-        /*loop {
-            match lexer.token() {
-                Ok(token) => println!("{:?}", token),
-                Err(Eof) => break,
-                Err(error) => {
-                    println!("{}", error);
-                    break;
-                },
-            }
-        }*/

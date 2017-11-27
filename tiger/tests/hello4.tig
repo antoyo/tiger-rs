@@ -9,6 +9,10 @@
     }
 ; variable := 10
 ; variable[42] := 10
+; let var arrayOfInt := intArray [10] of 42
+  in
+    print("hello")
+  end
 ; if 10 then print("10")
 ; if 10 then print("10") else print("not 10")
 ; while 10 do (

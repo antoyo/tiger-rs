@@ -19,34 +19,59 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::env;
-use std::fs::File;
-use std::io::{self, BufReader};
+#![allow(unknown_lints)]
 
 mod ast;
+mod env;
 mod error;
 mod lexer;
 mod parser;
 mod position;
+mod semant;
 mod symbol;
+mod tast;
 mod token;
+mod types;
 
+use std::env::args;
+use std::fs::File;
+use std::io::BufReader;
+use std::rc::Rc;
+
+use env::Env;
+use error::Error;
 use lexer::Lexer;
 use parser::Parser;
+use semant::SemanticAnalyzer;
+use symbol::{Strings, Symbols};
 
 fn main() {
-    drive().unwrap();
+    if let Err(errors) = drive() {
+        for error in errors {
+            println!("{}", error);
+        }
+    }
 }
 
-fn drive() -> Result<(), io::Error> {
-    let mut args = env::args();
+fn drive() -> Result<(), Vec<Error>> {
+    let mut args = args();
     args.next();
     if let Some(filename) = args.next() {
-        let file = BufReader::new(File::open(filename)?);
-        let lexer = Lexer::new(file);
-        let mut parser = Parser::new(lexer);
-        let ast = parser.parse();
-        println!("{:#?}", ast);
+        let strings = Rc::new(Strings::new());
+        let ast = (|| {
+            let file = BufReader::new(File::open(filename)?);
+            let lexer = Lexer::new(file);
+            let mut symbols = Symbols::new(Rc::clone(&strings));
+            let mut parser = Parser::new(lexer, &mut symbols);
+            parser.parse()
+        })()
+            .map_err(|error| vec![error])?;
+        let mut env = Env::new(&strings);
+        {
+            let mut semantic_analyzer = SemanticAnalyzer::new(&mut env);
+            semantic_analyzer.analyze(&ast)?;
+        }
+        env.end_scope();
     }
     Ok(())
 }

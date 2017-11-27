@@ -22,12 +22,14 @@
 use std::char;
 use std::io::{Bytes, Read};
 use std::iter::Peekable;
+use std::result;
 
-use error::Error::{Eof, InvalidEscape, Msg, Unclosed, UnknownToken};
-use error::Result;
+use error::Error::{self, Eof, InvalidEscape, Msg, Unclosed, UnknownToken};
 use position::Pos;
 use token::{Tok, Token};
 use token::Tok::*;
+
+pub type Result<T> = result::Result<T, Error>;
 
 pub struct Lexer<R: Read> {
     bytes_iter: Peekable<Bytes<R>>,
@@ -196,7 +198,7 @@ impl<R: Read> Lexer<R> {
     }
 
     fn save_start(&mut self) {
-        self.saved_pos = self.current_pos().clone();
+        self.saved_pos = self.current_pos();
     }
 
     fn simple_token(&mut self, token: Tok) -> Result<Token> {
@@ -246,7 +248,7 @@ impl<R: Read> Lexer<R> {
     }
 
     fn string(&mut self) -> Result<Token> {
-        let result = (|| {
+        let result = {
             self.save_start();
             let mut string = String::new();
             self.eat('"')?;
@@ -271,7 +273,7 @@ impl<R: Read> Lexer<R> {
             }
             self.eat('"')?;
             self.make_token(Str(string))
-        })();
+        };
         match result {
             Err(Eof) => Err(Unclosed {
                 pos: self.saved_pos,
@@ -295,6 +297,7 @@ impl<R: Read> Lexer<R> {
         Ok(buffer)
     }
 
+    #[allow(cyclomatic_complexity)]
     pub fn token(&mut self) -> Result<Token> {
         if let Some(&Ok(ch)) = self.bytes_iter.peek() {
             return match ch {
