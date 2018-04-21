@@ -1,0 +1,15 @@
+function f() =
+    let var v := 6
+    in
+        print(v);
+        let var v := 7
+        in
+            print(v)
+        end;
+        print(v);
+        let var v := 8
+        in
+            print(v)
+        end;
+        print(v)
+    end

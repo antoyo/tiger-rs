@@ -169,7 +169,7 @@ pub enum Var {
         this: Box<VarWithPos>,
     },
     Simple {
-        ident: Symbol,
+        ident: SymbolWithPos,
     },
     Subscript {
         expr: Box<ExprWithPos>,

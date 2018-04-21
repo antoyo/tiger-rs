@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2018 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -24,12 +24,16 @@
 mod ast;
 mod env;
 mod error;
+mod escape;
+mod frame;
+mod gen;
 mod lexer;
 mod parser;
 mod position;
 mod semant;
 mod symbol;
 mod tast;
+mod temp;
 mod token;
 mod types;
 
@@ -40,6 +44,8 @@ use std::rc::Rc;
 
 use env::Env;
 use error::Error;
+use escape::find_escapes;
+use frame::x86_64::X86_64;
 use lexer::Lexer;
 use parser::Parser;
 use semant::SemanticAnalyzer;
@@ -66,7 +72,8 @@ fn drive() -> Result<(), Vec<Error>> {
             parser.parse()
         })()
             .map_err(|error| vec![error])?;
-        let mut env = Env::new(&strings);
+        let escape_env = find_escapes(&ast, Rc::clone(&strings));
+        let mut env = Env::<X86_64>::new(&strings, escape_env);
         {
             let mut semantic_analyzer = SemanticAnalyzer::new(&mut env);
             semantic_analyzer.analyze(&ast)?;

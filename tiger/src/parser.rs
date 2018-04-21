@@ -190,7 +190,7 @@ impl<'a, R: Read> Parser<'a, R> {
                 OpenCurly => self.rec_create(WithPos::new(symbol, pos), pos),
                 _ => {
                     let var = WithPos::new(Var::Simple {
-                        ident: symbol,
+                        ident: WithPos::new(symbol, pos),
                     }, pos);
                     self.lvalue_or_assign(var)
                 }
@@ -404,14 +404,15 @@ impl<'a, R: Read> Parser<'a, R> {
             if let Of = self.peek()?.token {
                 match var.node {
                     Var::Subscript { expr, this } => {
+                        let pos = this.pos;
                         if let Var::Simple { ident } = this.node {
                             eat!(self, Of);
                             let init = Box::new(self.expr()?);
                             return Ok(WithPos::new(Expr::Array {
                                 init,
                                 size: expr,
-                                typ: WithPos::new(ident, this.pos),
-                            }, this.pos));
+                                typ: WithPos::new(ident.node, pos),
+                            }, pos));
                         }
                         else {
                             return Err(self.unexpected_token("neither dot nor subscript")?);
