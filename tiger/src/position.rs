@@ -20,6 +20,7 @@
  */
 
 use std::fmt::{self, Display, Debug, Formatter};
+use std::u32;
 
 #[derive(Clone, Copy)]
 pub struct Pos {
@@ -59,6 +60,13 @@ impl<T> WithPos<T> {
         Self {
             node,
             pos,
+        }
+    }
+
+    pub fn dummy(node: T) -> Self {
+        Self {
+            node,
+            pos: Pos::new(u32::MAX, u32::MAX),
         }
     }
 }

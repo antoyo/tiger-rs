@@ -98,15 +98,6 @@ impl EscapeFinder {
                     self.visit_exp(arg, depth);
                 }
             },
-            Expr::For { ref body, ref end, ref start, var, .. } => {
-                self.visit_exp(start, depth);
-                self.visit_exp(end, depth);
-                self.env.enter(var, DepthEscape {
-                    depth,
-                    escape: false,
-                });
-                self.visit_exp(body, depth);
-            },
             Expr::If { ref else_, ref test, ref then } => {
                 self.visit_exp(test, depth);
                 self.visit_exp(then, depth);

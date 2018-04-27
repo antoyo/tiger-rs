@@ -52,13 +52,6 @@ pub enum Expr {
         args: Vec<ExprWithPos>,
         function: Symbol,
     },
-    For {
-        body: Box<ExprWithPos>,
-        end: Box<ExprWithPos>,
-        escape: bool,
-        start: Box<ExprWithPos>,
-        var: Symbol,
-    },
     If {
         else_: Option<Box<ExprWithPos>>,
         test: Box<ExprWithPos>,
@@ -113,7 +106,7 @@ pub struct FuncDeclaration {
 
 pub type FuncDeclarationWithPos = WithPos<FuncDeclaration>;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Operator {
     And,
     Divide,
@@ -178,3 +171,9 @@ pub enum Var {
 }
 
 pub type VarWithPos = WithPos<Var>;
+
+pub fn dummy_var_expr(symbol: Symbol) -> ExprWithPos {
+    WithPos::dummy(Expr::Variable(WithPos::dummy(Var::Simple {
+        ident: WithPos::dummy(symbol),
+    })))
+}

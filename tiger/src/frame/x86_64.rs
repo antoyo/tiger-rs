@@ -19,34 +19,64 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+use ir::BinOp::Plus;
+use ir::Exp:: {
+    self,
+    BinOp,
+    Call,
+    Const,
+    Mem,
+    Name,
+};
+use ir::Statement;
 use super::Frame;
 use temp::{Label, Temp};
 
 use self::Access::{InFrame, InReg};
 
-const POINTER_SIZE: i32 = 8;
+const POINTER_SIZE: i64 = 8;
 
 #[derive(Clone)]
 pub struct X86_64 {
     formals: Vec<Access>, // Representation of parameters.
+    fp: Temp,
     name: Label,
-    pointer: i32,
+    pointer: i64,
+    return_value: Temp,
+}
+
+impl PartialEq for X86_64 {
+    fn eq(&self, other: &Self) -> bool {
+        self.fp == other.fp
+    }
 }
 
 #[derive(Clone)]
 pub enum Access {
-    InFrame(i32),
+    InFrame(i64),
     InReg(Temp),
 }
 
 impl Frame for X86_64 {
     type Access = Access;
 
+    const WORD_SIZE: i64 = 8;
+
+    fn fp(&self) -> Temp {
+        self.fp
+    }
+
+    fn return_value(&self) -> Temp {
+        self.return_value
+    }
+
     fn new(name: Label, formals: Vec<bool>) -> Self {
         let mut frame = X86_64 {
             formals: vec![],
+            fp: Temp::new(),
             name,
             pointer: 0,
+            return_value: Temp::new(),
         };
         let formals = formals.iter()
             .map(|&escape| frame.alloc_local(escape))
@@ -71,5 +101,28 @@ impl Frame for X86_64 {
         else {
             InReg(Temp::new())
         }
+    }
+
+    fn exp(&self, access: Self::Access, stack_frame: Exp) -> Exp {
+        match access {
+            InFrame(pos) => {
+                Mem(Box::new(BinOp {
+                    op: Plus,
+                    left: Box::new(stack_frame),
+                    right: Box::new(Const(pos)),
+                }))
+            },
+            InReg(reg) => {
+                Exp::Temp(reg)
+            },
+        }
+    }
+
+    fn external_call(name: &str, arguments: Vec<Exp>) -> Exp {
+        Call(Box::new(Name(Label::with_name(name))), arguments)
+    }
+
+    fn proc_entry_exit1(&self, statement: Statement) -> Statement {
+        statement
     }
 }

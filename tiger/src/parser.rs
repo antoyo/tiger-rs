@@ -50,6 +50,7 @@ use ast::{
     TyWithPos,
     Var,
     VarWithPos,
+    dummy_var_expr,
 };
 use ast::Declaration::VariableDeclaration;
 use error::Error;
@@ -262,20 +263,73 @@ impl<'a, R: Read> Parser<'a, R> {
     fn for_loop(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, For);
         let var_name;
-        eat!(self, Ident, var_name);
+        let var_pos = eat!(self, Ident, var_name);
         let var = self.symbols.symbol(&var_name);
         eat!(self, ColonEqual);
-        let start = Box::new(self.expr()?);
+        let start = self.expr()?;
         eat!(self, To);
-        let end = Box::new(self.expr()?);
+        let end = self.expr()?;
         eat!(self, Do);
-        let body = Box::new(self.expr()?);
-        Ok(WithPos::new(Expr::For {
-            body,
-            end,
-            escape: false,
-            start,
-            var,
+        let body = self.expr()?;
+        // Convert for loop into while loop.
+        let start_symbol = self.symbols.symbol(&var_name);
+        let end_symbol = self.symbols.symbol(&format!("__{}_limit", var_name));
+        let declarations = vec![
+            WithPos::dummy(VariableDeclaration {
+                escape: false,
+                init: start,
+                name: start_symbol,
+                typ: None,
+            }),
+            WithPos::dummy(VariableDeclaration {
+                escape: false,
+                init: end,
+                name: end_symbol,
+                typ: None,
+            }),
+        ];
+        let body =
+            Expr::If {
+                else_: None,
+                test: Box::new(
+                    WithPos::dummy(Expr::Oper {
+                        left: Box::new(dummy_var_expr(start_symbol)),
+                        oper: WithPos::dummy(Operator::Le),
+                        right: Box::new(dummy_var_expr(end_symbol)),
+                    })
+                ),
+                then:
+                    Box::new(WithPos::dummy(Expr::While {
+                        body: Box::new(WithPos::dummy(Expr::Sequence(vec![
+                            body,
+                            WithPos::dummy(Expr::If {
+                                else_: Some(Box::new(WithPos::dummy(Expr::Break))),
+                                test:
+                                    Box::new(WithPos::dummy(Expr::Oper {
+                                        left: Box::new(dummy_var_expr(start_symbol)),
+                                        oper: WithPos::dummy(Operator::Lt),
+                                        right: Box::new(dummy_var_expr(end_symbol)),
+                                    })),
+                                then:
+                                    Box::new(WithPos::dummy(Expr::Assign {
+                                        expr: Box::new(WithPos::dummy(Expr::Oper {
+                                            left: Box::new(dummy_var_expr(start_symbol)),
+                                            oper: WithPos::dummy(Operator::Plus),
+                                            right: Box::new(WithPos::dummy(Expr::Int { value: 1 })),
+                                        })),
+                                        var: WithPos::new(Var::Simple { ident: WithPos::new(var, var_pos) }, var_pos),
+                                    })),
+                            }),
+                        ]))),
+                        test: Box::new(WithPos::dummy(Expr::Int {
+                            value: 1,
+                        })),
+                    })),
+            };
+
+        Ok(WithPos::new(Expr::Let {
+            body: Box::new(WithPos::dummy(body)),
+            declarations,
         }, pos))
     }
 

@@ -21,7 +21,7 @@
 
 use self::Label::{Named, Num};
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Temp {
     num: u32,
 }
@@ -57,7 +57,7 @@ impl Label {
         }
     }
 
-    pub fn with_name(name: String) -> Self {
-        Named(name)
+    pub fn with_name(name: &str) -> Self {
+        Named(name.to_string())
     }
 }

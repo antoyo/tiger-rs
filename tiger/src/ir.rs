@@ -19,38 +19,67 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use ir::{Exp, Statement};
+#![allow(dead_code)]
+
 use temp::{Label, Temp};
 
-pub mod x86_64;
-
-pub enum Fragment<F: Frame> {
-    Function {
-        body: Statement,
-        frame: F,
+#[derive(Clone)]
+pub enum Exp {
+    Const(i64),
+    /// Dummy expression to return when there is an error.
+    Error,
+    Name(Label),
+    Temp(Temp),
+    BinOp {
+        op: BinOp,
+        left: Box<Exp>,
+        right: Box<Exp>,
     },
-    Str(Label, String),
+    Mem(Box<Exp>),
+    Call(Box<Exp>, Vec<Exp>),
+    ExpSequence(Box<Statement>, Box<Exp>),
 }
 
-pub trait Frame: Clone {
-    type Access: Clone;
+#[derive(Clone)]
+pub enum Statement {
+    Move(Exp, Exp),
+    Exp(Exp),
+    Jump(Exp, Vec<Label>),
+    CondJump {
+        op: RelationalOp,
+        left: Exp,
+        right: Exp,
+        true_label: Label,
+        false_label: Label,
+    },
+    Sequence(Box<Statement>, Box<Statement>),
+    Label(Label),
+}
 
-    const WORD_SIZE: i64;
+#[derive(Clone)]
+pub enum BinOp {
+    Plus,
+    Minus,
+    Mul,
+    Div,
+    And,
+    Or,
+    ShiftLeft,
+    ShiftRight,
+    ArithmeticShiftRight,
+    Xor,
+}
 
-    fn fp(&self) -> Temp;
-    fn return_value(&self) -> Temp;
-
-    fn new(name: Label, formals: Vec<bool>) -> Self;
-
-    fn name(&self) -> Label;
-
-    fn formals(&self) -> &[Self::Access];
-
-    fn alloc_local(&mut self, escape: bool) -> Self::Access;
-
-    fn exp(&self, access: Self::Access, stack_frame: Exp) -> Exp;
-
-    fn external_call(name: &str, arguments: Vec<Exp>) -> Exp;
-
-    fn proc_entry_exit1(&self, statement: Statement) -> Statement;
+#[derive(Clone)]
+pub enum RelationalOp {
+    Equal,
+    NotEqual,
+    LesserThan,
+    GreaterThan,
+    LesserOrEqual,
+    GreaterOrEqual,
+    UnsignedLesserThan,
+    UnsignedLesserOrEqual,
+    UnsignedGreaterThan,
+    UnsignedGreaterOrEqual,
 }

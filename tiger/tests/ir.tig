@@ -1,0 +1,6 @@
+let type intArray = array of int
+    var a := intArray[12] of 0
+    var b := intArray[12] of 7
+in
+    a := b
+end
