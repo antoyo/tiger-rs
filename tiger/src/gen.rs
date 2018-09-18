@@ -57,7 +57,6 @@ use ir::Statement::{
 };
 use temp::{Label, Temp};
 
-#[allow(type_alias_bounds)]
 pub type Access<F: Frame> = (Level<F>, F::Access);
 
 #[derive(Clone)]
