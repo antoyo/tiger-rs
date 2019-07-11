@@ -22,24 +22,75 @@
 use std::cmp::{max, min};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::result;
 
 use position::Pos;
 use self::Error::*;
 use symbol::Symbols;
 use terminal::Terminal;
 use token::Tok;
+use types::Type;
+
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Debug)]
 pub enum Error {
+    BreakOutsideLoop {
+        pos: Pos,
+    },
+    CannotIndex {
+        pos: Pos,
+        typ: Type,
+    },
+    Cycle {
+        pos: Pos,
+    },
+    DuplicateParam {
+        ident: String,
+        pos: Pos,
+    },
     Eof,
+    ExtraField {
+        ident: String,
+        pos: Pos,
+        struct_name: String,
+    },
     InvalidEscape {
         escape: String,
         pos: Pos,
     },
+    MissingField {
+        ident: String,
+        pos: Pos,
+        struct_name: String,
+    },
     Msg(String),
+    Multi(Vec<Error>),
+    NotARecord {
+        pos: Pos,
+        typ: Type,
+    },
+    RecordType {
+        pos: Pos,
+    },
+    Type {
+        expected: Type,
+        pos: Pos,
+        unexpected: Type,
+    },
     Unclosed {
         pos: Pos,
         token: &'static str,
+    },
+    Undefined {
+        ident: String,
+        item: String,
+        pos: Pos,
+    },
+    UnexpectedField {
+        ident: String,
+        pos: Pos,
+        struct_name: String,
     },
     UnexpectedToken {
         expected: String,
@@ -50,30 +101,93 @@ pub enum Error {
         pos: Pos,
         start: char,
     },
+    UnexpectedType {
+        kind: String,
+        pos: Pos,
+    },
 }
 
 impl Error {
     pub fn show(&self, symbols: &Symbols<()>, terminal: &Terminal) -> io::Result<()> {
+        if let Multi(ref errors) = *self {
+            for error in errors.iter().rev() {
+                error.show(symbols, terminal)?;
+            }
+            return Ok(());
+        }
         eprint!("{}{}error: {}", terminal.bold(), terminal.red(), terminal.reset_color());
         match *self {
+            BreakOutsideLoop { pos } => {
+                eprintln!("Break statement used outside of loop{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
+            CannotIndex { pos, ref typ } => {
+                eprintln!("Cannot index value of type `{}`{}", typ.show(symbols), terminal.end_bold());
+                pos.show(symbols, terminal)
+            },
+            Cycle { pos } => {
+                eprintln!("Type cycle detected:{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
+            DuplicateParam { ref ident, pos } => {
+                eprintln!("Duplicate param `{}`{}", ident, terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
             Eof => eprintln!("end of file"),
-            InvalidEscape { ref escape, ref pos } => {
+            ExtraField { ref ident, pos, ref struct_name } => {
+                eprintln!("Extra field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
+            InvalidEscape { ref escape, pos } => {
                 eprintln!("Invalid escape \\{}{}", escape, terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },
+            MissingField { ref ident, pos, ref struct_name } => {
+                eprintln!("Missing field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
             Msg(ref string) => eprintln!("{}", string),
-            Unclosed { ref pos, token } => {
+            Multi(_) => unreachable!(),
+            NotARecord { pos, ref typ } => {
+                eprintln!("Type `{}` is not a struct or a class type{}", typ.show(symbols), terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            Error::RecordType { pos } => {
+                eprintln!("Expecting type when value is nil{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
+            Error::Type { ref expected, pos, ref unexpected } => {
+                eprintln!("Unexpected type {}, expecting {}{}", unexpected.show(symbols), expected.show(symbols), terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            Unclosed { pos, token } => {
                 eprintln!("Unclosed {}{}", token, terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },
-            UnexpectedToken { ref expected, ref pos, ref unexpected } => {
+            Undefined { ref ident, ref item, pos } => {
+                eprintln!("Undefined {} `{}`{}", item, ident, terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            UnexpectedField { ref ident, pos, ref struct_name } => {
+                eprintln!("Unexpected field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
+            UnexpectedToken { ref expected, pos, ref unexpected } => {
                 eprintln!("Unexpected token {}, expecting {}{}", unexpected, expected, terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },
-            UnknownToken { ref pos, ref start } => {
+            UnexpectedType { ref kind, pos } => {
+                eprintln!("Expecting {} type{}", kind, terminal.end_bold());
+                pos.show(symbols, terminal);
+            },
+            UnknownToken { pos, ref start } => {
                 eprintln!("Unexpected start of token `{}`{}", start, terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
@@ -85,7 +199,7 @@ impl Error {
     }
 }
 
-fn highlight_line(pos: &Pos, symbols: &Symbols<()>, terminal: &Terminal) -> io::Result<()> {
+fn highlight_line(pos: Pos, symbols: &Symbols<()>, terminal: &Terminal) -> io::Result<()> {
     let filename = symbols.name(pos.file);
     let mut file = File::open(filename)?;
     // TODO: support longer lines.

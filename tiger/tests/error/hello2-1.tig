@@ -1,0 +1,120 @@
+/* Hello-world with function */
+let function hello(param: string) = print("Hello, World!\n")
+    function to_string(integer: int): string = "42"
+    function odd(integer: int): int =
+        if integer = 1 then
+            1
+        else
+            even (integer - 1)
+    function even(integer: int): int =
+        if integer = 0 then
+            1
+        else
+            odd (integer - 1)
+    function fib(integer: int): int =
+        if integer = 0 then
+            1
+        else if integer = 1 then
+            1
+        else
+            fib (integer - 1) + fib (integer - 2)
+    type list = {
+        first: int,
+        rest: list
+    }
+    type a = b
+    type b = c
+    type c = int
+    function to_string2(integer: int): string = integer
+    function to_string3(integer: unexisting): string = "42"
+    function to_string4(integer: int): unexisting = "42"
+    function hello2(param: string, param: int) = print("Hello, World!\n")
+    var string: string := "hello"
+    type myStruct = {
+        myNum: int
+    }
+    type myStruct2 = {
+        myNum: unexisting
+    }
+    type intArray2 = array of unexisting
+    var record: myStruct := nil
+    type x1 = y1
+    type y1 = z1
+    type z1 = x1
+    type x = y
+    type y = z
+    type z = { field: x }
+    var record2 := nil
+    var string2: string := nil
+    var string2: unexisting := 42
+    var string2: string := 42
+in (
+    hello();
+    let var value := 42
+        type intArray = array of int
+        var arrayOfInt := intArray [10] of 42
+        var arrayOfString := intArray [10] of "hello"
+        var arrayOfString := intArray ["test"] of 42
+        var none := value := 10
+        var none2 := value := "test"
+        type MyRecord = { myField: int, secondField: int }
+        var record := MyRecord
+            { myField = 10
+            , secondField = 42
+            }
+        var record2 := int
+            { myField = 10
+            , secondField = 42
+            }
+        var record2 := MyRecord
+            { myField = 10
+            , secondField = 42
+            , secondField2 = 42
+            }
+        var record2 := MyRecord
+            { myField = 10
+            }
+        var record2 := MyRecord
+            { myField = "10"
+            , secondField = 42
+            }
+        var record2 := MyRecord2
+            { myField = 10
+            , secondField = 42
+            }
+    in
+        arrayOfInt[0] = 42;
+        string[0] = 42;
+        arrayOfInt["0"] = 42;
+        arrayOfInt[0] = "42";
+        record.myField = 42;
+        record.myField2 = 42;
+        record.myField = "42";
+        print("42")
+    end;
+    print("string");
+    print("test");
+    string := "10";
+    break;
+    for i := "test" to 10 do
+        print(to_string(i));
+    for i := 0 to "test" do
+        print(to_string(i));
+    while "10" do
+        print(to_string(10));
+    while 10 do
+        print(to_string(10));
+    for i := 0 to 10 do (
+        print(to_string(i));
+        let function hello2(param: string) = (
+            print("Hello, World!\n");
+            break
+        )
+        in
+            break
+        end
+    );
+    print(value);
+    print(param)
+)
+end

@@ -95,3 +95,9 @@ impl<T> WithPos<T> {
         }
     }
 }
+
+impl<T: PartialEq> PartialEq for WithPos<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+    }
+}
