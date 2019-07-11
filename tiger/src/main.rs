@@ -22,6 +22,7 @@
 mod ast;
 mod error;
 mod lexer;
+mod parser;
 mod position;
 mod symbol;
 mod terminal;
@@ -30,34 +31,35 @@ mod token;
 use std::env::args;
 use std::fs::File;
 use std::io::BufReader;
+use std::rc::Rc;
 
 use error::Error;
 use lexer::Lexer;
+use symbol::{Strings, Symbols};
+use parser::Parser;
 use terminal::Terminal;
 
 fn main() {
-    if let Err(error) = drive() {
+    let strings = Rc::new(Strings::new());
+    let mut symbols = Symbols::new(Rc::clone(&strings));
+    if let Err(error) = drive(&mut symbols) {
         let terminal = Terminal::new();
-        if let Err(error) = error.show(&terminal) {
+        if let Err(error) = error.show(&symbols, &terminal) {
             eprintln!("Error printing errors: {}", error);
         }
     }
 }
 
-fn drive() -> Result<(), Error> {
+fn drive(symbols: &mut Symbols<()>) -> Result<(), Error> {
     let mut args = args();
     args.next();
     if let Some(filename) = args.next() {
         let file = BufReader::new(File::open(&filename)?);
-        let mut lexer = Lexer::new(file, &filename);
-        loop {
-            let token = lexer.token();
-            match token {
-                Ok(token) => println!("{:?}", token),
-                Err(Error::Eof) => break,
-                Err(error) => return Err(error),
-            }
-        }
+        let file_symbol = symbols.symbol(&filename);
+        let lexer = Lexer::new(file, file_symbol);
+        let mut parser = Parser::new(lexer, symbols);
+        let ast = parser.parse()?;
+        println!("{:?}", ast);
     }
     Ok(())
 }

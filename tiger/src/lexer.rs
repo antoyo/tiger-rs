@@ -27,6 +27,7 @@ use std::result;
 use error::num_text_size;
 use error::Error::{self, Eof, InvalidEscape, Msg, Unclosed, UnknownToken};
 use position::Pos;
+use symbol::Symbol;
 use token::{Tok, Token};
 use token::Tok::*;
 
@@ -39,7 +40,7 @@ pub struct Lexer<R: Read> {
 }
 
 impl<R: Read> Lexer<R> {
-    pub fn new(reader: R, filename: &str) -> Self {
+    pub fn new(reader: R, filename: Symbol) -> Self {
         Lexer {
             bytes_iter: reader.bytes().peekable(),
             pos: Pos::new(1, 1, 0, filename, 0),

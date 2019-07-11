@@ -25,7 +25,9 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use position::Pos;
 use self::Error::*;
+use symbol::Symbols;
 use terminal::Terminal;
+use token::Tok;
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -39,6 +41,11 @@ pub enum Error {
         pos: Pos,
         token: &'static str,
     },
+    UnexpectedToken {
+        expected: String,
+        pos: Pos,
+        unexpected: Tok,
+    },
     UnknownToken {
         pos: Pos,
         start: char,
@@ -46,25 +53,30 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn show(&self, terminal: &Terminal) -> io::Result<()> {
+    pub fn show(&self, symbols: &Symbols<()>, terminal: &Terminal) -> io::Result<()> {
         eprint!("{}{}error: {}", terminal.bold(), terminal.red(), terminal.reset_color());
         match *self {
             Eof => eprintln!("end of file"),
             InvalidEscape { ref escape, ref pos } => {
                 eprintln!("Invalid escape \\{}{}", escape, terminal.end_bold());
-                pos.show(terminal);
-                highlight_line(pos, terminal)?;
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
             },
             Msg(ref string) => eprintln!("{}", string),
             Unclosed { ref pos, token } => {
                 eprintln!("Unclosed {}{}", token, terminal.end_bold());
-                pos.show(terminal);
-                highlight_line(pos, terminal)?;
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            UnexpectedToken { ref expected, ref pos, ref unexpected } => {
+                eprintln!("Unexpected token {}, expecting {}{}", unexpected, expected, terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
             },
             UnknownToken { ref pos, ref start } => {
                 eprintln!("Unexpected start of token `{}`{}", start, terminal.end_bold());
-                pos.show(terminal);
-                highlight_line(pos, terminal)?;
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
             },
         }
         eprintln!("");
@@ -73,8 +85,9 @@ impl Error {
     }
 }
 
-fn highlight_line(pos: &Pos, terminal: &Terminal) -> io::Result<()> {
-    let mut file = File::open(&pos.filename)?;
+fn highlight_line(pos: &Pos, symbols: &Symbols<()>, terminal: &Terminal) -> io::Result<()> {
+    let filename = symbols.name(pos.file);
+    let mut file = File::open(filename)?;
     // TODO: support longer lines.
     const LENGTH: i64 = 4096;
     let mut buffer = [0; LENGTH as usize];
@@ -111,5 +124,11 @@ pub fn num_text_size(num: i64) -> usize {
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
         Msg(error.to_string())
+    }
+}
+
+impl<'a> From<&'a Error> for Error {
+    fn from(error: &'a Error) -> Self {
+        error.clone()
     }
 }
