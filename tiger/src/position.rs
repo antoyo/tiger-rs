@@ -47,6 +47,10 @@ impl Pos {
         }
     }
 
+    pub fn dummy() -> Self {
+        Self::new(u32::MAX, u32::MAX, u64::MAX, "", 0)
+    }
+
     pub fn show(&self, terminal: &Terminal) {
         eprintln!("   {}{}-->{}{} {}:{}:{}", terminal.bold(), terminal.blue(), terminal.reset_color(), terminal.end_bold(), self.filename, self.line, self.column)
     }
@@ -55,5 +59,20 @@ impl Pos {
 impl Display for Pos {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         write!(formatter, "{}:{}:", self.line, self.column)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WithPos<T> {
+    pub node: T,
+    pub pos: Pos,
+}
+
+impl<T> WithPos<T> {
+    pub fn dummy(node: T) -> Self {
+        Self {
+            node,
+            pos: Pos::dummy(),
+        }
     }
 }
