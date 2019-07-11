@@ -41,6 +41,11 @@ impl Strings {
             strings: RefCell::new(HashMap::new()),
         }
     }
+
+    pub fn get(&self, symbol: Symbol) -> Option<String> {
+        let strings = self.strings.borrow();
+        strings.get(&symbol).map(Clone::clone)
+    }
 }
 
 #[derive(Debug)]
@@ -83,6 +88,11 @@ impl<T> Symbols<T> {
     pub fn look(&self, symbol: Symbol) -> Option<&T> {
         self.table.get(&symbol)
             .and_then(|vec| vec.last())
+    }
+
+    pub fn look_mut(&mut self, symbol: Symbol) -> Option<&mut T> {
+        self.table.get_mut(&symbol)
+            .and_then(|vec| vec.last_mut())
     }
 
     pub fn name(&self, symbol: Symbol) -> String {

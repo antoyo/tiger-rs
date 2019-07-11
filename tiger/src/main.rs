@@ -22,12 +22,16 @@
 mod ast;
 mod env;
 mod error;
+mod escape;
+mod frame;
+mod gen;
 mod ir;
 mod lexer;
 mod parser;
 mod position;
 mod semant;
 mod symbol;
+mod temp;
 mod terminal;
 mod token;
 mod types;
@@ -39,6 +43,8 @@ use std::rc::Rc;
 
 use env::Env;
 use error::Error;
+use escape::find_escapes;
+use frame::x86_64::X86_64;
 use lexer::Lexer;
 use symbol::{Strings, Symbols};
 use parser::Parser;
@@ -65,8 +71,9 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let lexer = Lexer::new(file, file_symbol);
         let mut parser = Parser::new(lexer, symbols);
         let ast = parser.parse()?;
-        let mut env = Env::new(&strings);
-        let semantic_analyzer = SemanticAnalyzer::new(&mut env);
+        let escape_env = find_escapes(&ast, Rc::clone(&strings));
+        let mut env = Env::<X86_64>::new(&strings, escape_env);
+        let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings));
         let ir = semantic_analyzer.analyze(ast)?;
         println!("{:?}", ir);
     }

@@ -22,28 +22,38 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use escape::EscapeEnv;
+use frame::Frame;
+use gen;
+use gen::{Access, Level};
 use symbol::{Strings, Symbol, Symbols};
+use temp::Label;
 use types::Type;
 
 #[derive(Clone)]
-pub enum Entry {
+pub enum Entry<F: Clone + Frame> {
     Fun {
+        external: bool,
+        label: Label,
+        level: Level<F>,
         parameters: Vec<Type>,
         result: Type,
     },
     Var {
+        access: Access<F>,
         typ: Type,
     },
     Error,
 }
 
-pub struct Env {
+pub struct Env<F: Clone + Frame> {
+    escape_env: EscapeEnv,
     type_env: Symbols<Type>,
-    var_env: Symbols<Entry>,
+    var_env: Symbols<Entry<F>>,
 }
 
-impl Env {
-    pub fn new(strings: &Rc<Strings>) -> Self {
+impl<F: Clone + Frame> Env<F> {
+    pub fn new(strings: &Rc<Strings>, escape_env: EscapeEnv) -> Self {
         let mut type_env = Symbols::new(Rc::clone(strings));
         let int_symbol = type_env.symbol("int");
         type_env.enter(int_symbol, Type::Int);
@@ -52,6 +62,7 @@ impl Env {
 
         let var_env = Symbols::new(Rc::clone(strings));
         let mut env = Self {
+            escape_env,
             type_env,
             var_env,
         };
@@ -66,6 +77,9 @@ impl Env {
     fn add_function(&mut self, name: &str, parameters: Vec<Type>, result: Type) {
         let symbol = self.var_env.symbol(name);
         let entry = Entry::Fun {
+            external: true,
+            label: Label::with_name(name),
+            level: gen::outermost(), // FIXME: Might want to create a new level.
             parameters,
             result,
         };
@@ -86,15 +100,21 @@ impl Env {
         self.type_env.enter(symbol, typ);
     }
 
-    pub fn enter_var(&mut self, symbol: Symbol, data: Entry) {
+    pub fn enter_var(&mut self, symbol: Symbol, data: Entry<F>) {
         self.var_env.enter(symbol, data);
+    }
+
+    pub fn look_escape(&self, symbol: Symbol) -> bool {
+        self.escape_env.look(symbol)
+            .expect("escape")
+            .escape
     }
 
     pub fn look_type(&self, symbol: Symbol) -> Option<&Type> {
         self.type_env.look(symbol)
     }
 
-    pub fn look_var(&self, symbol: Symbol) -> Option<&Entry> {
+    pub fn look_var(&self, symbol: Symbol) -> Option<&Entry<F>> {
         self.var_env.look(symbol)
     }
 
