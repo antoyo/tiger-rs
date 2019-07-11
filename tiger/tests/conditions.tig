@@ -1,0 +1,23 @@
+let var num := 42
+in (
+    if num > 40 then
+        print("num > 40\n")
+    else
+        print("num <= 40\n");
+
+    if num < 40 then
+        print("num < 40\n")
+    else
+        print("num >= 40\n");
+
+    if num > 42 then
+        print("num > 42\n")
+    else
+        print("num <= 42\n");
+
+    if num < 42 then
+        print("num < 42\n")
+    else
+        print("num >= 42\n")
+)
+end

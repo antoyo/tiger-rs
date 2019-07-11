@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+tests/*
+!tests/**/
+!tests/*.*
+tests/*.o
+tests/*.s
+tests/error/*
+!tests/error/**/
+!tests/error/*.*
+tests/error/*.o
+tests/error/*.s

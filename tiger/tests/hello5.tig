@@ -1,0 +1,13 @@
+let function hello() = print("Hello, World!\n")
+    type intArray = array of int
+in
+hello();
+print("Test\n");
+5 + 2;
+10 * 11 + 2 / 1 * -42;
+10 * (11 + 2) / 1 * -42;
+intArray [10] of 42
+/*; intArray.field[10] of 32*/
+/*; intArray[10].field of 32*/
+/* ; intArray [10][42] of 42 */
+end

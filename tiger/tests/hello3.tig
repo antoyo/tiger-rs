@@ -1,0 +1,57 @@
+let function hello() = print("Hello, World!\n")
+    var num := 42
+    var num: int := 42
+    type myNum = int
+    type myArray = array of myNum
+    type myStruct = {
+        myNum: int
+    }
+    type myString = {
+        len: int
+    }
+    type myStruct2 = {
+        myNum2: int,
+        myString: myString
+    }
+    function myFunc(myParam: int) = (
+        print("Hello ");
+        printi(myParam)
+    )
+    function id(myParam: int): int = myParam
+    function const(param: int, other: int): int = param
+    var myNull: myStruct := nil
+    type intArray = array of int
+    type arrayOfArray = array of intArray
+    var myArray := intArray [10] of 44
+    var myArrayOfArray := arrayOfArray [10] of intArray [10] of 43
+    var indexing := myArray[0]
+    var myNum := 9
+    var indexing := myArrayOfArray[myNum][0]
+    var myStruct := myStruct { myNum = 42 }
+    var fielding := myStruct.myNum
+    var myStruct2 := myStruct2 {
+        myNum2 = 10,
+        myString = myString {
+            len = 120
+        }
+    }
+    var fielding := myStruct2.myString.len
+    type myType = {
+        myString: myArray
+    }
+    type arrayOfStruct = array of myType
+    var myArrayOfStruct := arrayOfStruct [10] of myType { myString = myArray [10] of 10 }
+    var both := myArrayOfStruct[0].myString[1]
+in (
+    hello();
+    myFunc(45);
+    printi(id(18));
+    printi(const(2, 4));
+    printi(myArray[4]);
+    printi(myArray[0]);
+    printi(indexing);
+    printi(myStruct.myNum);
+    printi(fielding);
+    printi(both)
+)
+end

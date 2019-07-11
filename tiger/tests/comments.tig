@@ -1,0 +1,10 @@
+let var N := 8
+/*
+ *  var B := 42
+ /* var C := 12
+  */
+ */
+in
+    print("N\n")
+end
+

@@ -1,0 +1,9 @@
+let var i := 0
+    var j := 1
+    var k := 2
+in (
+    printi(i);
+    printi(j);
+    printi(k)
+)
+end

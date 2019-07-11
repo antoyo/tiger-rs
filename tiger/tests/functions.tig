@@ -1,0 +1,20 @@
+let function maximum(a: int, b: int): int =
+        if a > b then
+            a
+        else
+            b
+    function minimum(a: int, b: int): int =
+        if a < b then
+            a
+        else
+            b
+    function sum10(a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int, i: int, j: int): int =
+        a + b + c + d + e + f + g + h + i + j
+in (
+    printi(minimum(42, 24));
+    printi(maximum(42, 24));
+    printi(minimum(24, 42));
+    printi(maximum(24, 42));
+    printi(sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+)
+end

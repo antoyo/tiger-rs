@@ -1,0 +1,18 @@
+let function f() =
+        let var v := 6
+        in
+            printi(v);
+            let var v := 7
+            in
+                printi(v)
+            end;
+            printi(v);
+            let var v := 8
+            in
+                printi(v)
+            end;
+            printi(v)
+        end
+in
+    f()
+end
