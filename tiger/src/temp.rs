@@ -55,6 +55,13 @@ impl Label {
         }
     }
 
+    pub fn to_name(&self) -> String {
+        match *self {
+            Named(ref name) => name.clone(),
+            Num(_) => panic!("Expected Named"),
+        }
+    }
+
     pub fn with_name(name: &str) -> Self {
         Named(name.to_string())
     }

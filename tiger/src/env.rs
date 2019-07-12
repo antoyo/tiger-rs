@@ -126,6 +126,10 @@ impl<F: Clone + Frame> Env<F> {
         self.type_env.name(symbol)
     }
 
+    pub fn type_symbol(&mut self, string: &str) -> Symbol {
+        self.type_env.symbol(string)
+    }
+
     pub fn var_name(&self, symbol: Symbol) -> String {
         self.var_env.name(symbol)
     }

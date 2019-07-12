@@ -44,6 +44,7 @@ use std::rc::Rc;
 use env::Env;
 use error::Error;
 use escape::find_escapes;
+use frame::Fragment;
 use frame::x86_64::X86_64;
 use lexer::Lexer;
 use symbol::{Strings, Symbols};
@@ -69,13 +70,20 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let file = BufReader::new(File::open(&filename)?);
         let file_symbol = symbols.symbol(&filename);
         let lexer = Lexer::new(file, file_symbol);
+        let main_symbol = symbols.symbol("main");
         let mut parser = Parser::new(lexer, symbols);
         let ast = parser.parse()?;
         let escape_env = find_escapes(&ast, Rc::clone(&strings));
         let mut env = Env::<X86_64>::new(&strings, escape_env);
         let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings));
-        let ir = semantic_analyzer.analyze(ast)?;
-        println!("{:?}", ir);
+        let fragments = semantic_analyzer.analyze(main_symbol, ast)?;
+
+        for fragment in &fragments {
+            match fragment {
+                Fragment::Function { body, .. } => println!("{:#?}", body),
+                Fragment::Str(_, string) => println!("String {}", string),
+            }
+        }
     }
     Ok(())
 }

@@ -19,14 +19,36 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 
-use temp::Label;
+use ir::{Exp, Statement};
+use temp::{Label, Temp};
 
 pub mod x86_64;
 
+pub enum Fragment<F: Frame> {
+    Function {
+        body: Statement,
+        frame: Rc<RefCell<F>>,
+    },
+    Str(Label, String),
+}
+
 pub trait Frame: Clone {
     type Access: Clone + Debug;
+
+    const WORD_SIZE: i64;
+
+    fn registers() -> Vec<Temp>;
+    fn register_count() -> usize;
+    fn temp_map() -> HashMap<Temp, &'static str>;
+    fn special_name(temp: Temp) -> Option<&'static str>;
+
+    fn fp() -> Temp;
+    fn return_value() -> Temp;
 
     fn new(name: Label, formals: Vec<bool>) -> Self;
 
@@ -35,4 +57,8 @@ pub trait Frame: Clone {
     fn formals(&self) -> &[Self::Access];
 
     fn alloc_local(&mut self, escape: bool) -> Self::Access;
+
+    fn exp(&self, access: Self::Access, stack_frame: Exp) -> Exp;
+
+    fn external_call(name: &str, arguments: Vec<Exp>) -> Exp;
 }
