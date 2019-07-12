@@ -25,6 +25,7 @@ mod asm;
 mod asm_gen;
 mod ast;
 mod canon;
+mod color;
 mod env;
 mod error;
 mod escape;
@@ -37,6 +38,7 @@ mod lexer;
 mod liveness;
 mod parser;
 mod position;
+mod reg_alloc;
 mod semant;
 mod symbol;
 mod temp;
@@ -59,6 +61,7 @@ use frame::x86_64::X86_64;
 use lexer::Lexer;
 use symbol::{Strings, Symbols};
 use parser::Parser;
+use reg_alloc::alloc;
 use semant::SemanticAnalyzer;
 use terminal::Terminal;
 
@@ -91,7 +94,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         for fragment in fragments {
             match fragment {
                 Fragment::Function { body, frame } => {
-                    let frame = frame.borrow_mut();
+                    let mut frame = frame.borrow_mut();
 
                     let statements = linearize(body);
                     let (basic_blocks, done_label) = basic_blocks(statements);
@@ -103,6 +106,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                     }
                     let instructions = generator.get_result();
                     let instructions = frame.proc_entry_exit2(instructions);
+                    let instructions = alloc::<X86_64>(instructions, &mut *frame);
 
                     for instruction in instructions {
                         println!("{}", instruction.to_string::<X86_64>());
