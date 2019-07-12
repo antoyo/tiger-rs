@@ -20,6 +20,7 @@
  */
 
 mod ast;
+mod canon;
 mod env;
 mod error;
 mod escape;
@@ -41,6 +42,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::rc::Rc;
 
+use canon::{basic_blocks, linearize, trace_schedule};
 use env::Env;
 use error::Error;
 use escape::find_escapes;
@@ -78,10 +80,15 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings));
         let fragments = semantic_analyzer.analyze(main_symbol, ast)?;
 
-        for fragment in &fragments {
+        for fragment in fragments {
             match fragment {
-                Fragment::Function { body, .. } => println!("{:#?}", body),
-                Fragment::Str(_, string) => println!("String {}", string),
+                Fragment::Function { body, .. } => {
+                    let statements = linearize(body);
+                    let (basic_blocks, done_label) = basic_blocks(statements);
+                    let statements = trace_schedule(basic_blocks, done_label);
+                    println!("{:#?}", statements);
+                },
+                Fragment::Str(_, _) => (),
             }
         }
     }
