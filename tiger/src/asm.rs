@@ -60,3 +60,9 @@ impl Instruction {
         }
     }
 }
+
+pub struct Subroutine {
+    pub prolog: String,
+    pub body: Vec<Instruction>,
+    pub epilog: String,
+}

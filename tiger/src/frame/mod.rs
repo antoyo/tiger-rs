@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
-use asm::Instruction;
+use asm::{Instruction, Subroutine};
 use ir::{Exp, Statement};
 use temp::{Label, Temp};
 
@@ -63,5 +63,7 @@ pub trait Frame: Clone {
 
     fn external_call(name: &str, arguments: Vec<Exp>) -> Exp;
 
+    fn proc_entry_exit1(&mut self, statement: Statement) -> Statement;
     fn proc_entry_exit2(&self, instructions: Vec<Instruction>) -> Vec<Instruction>;
+    fn proc_entry_exit3(&self, body: Vec<Instruction>) -> Subroutine;
 }

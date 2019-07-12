@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::sync::Once;
 
-use asm::Instruction;
+use asm::{Instruction, Subroutine};
 use ir::BinOp::Plus;
 use ir::Exp:: {
     self,
@@ -32,6 +32,7 @@ use ir::Exp:: {
     Mem,
     Name,
 };
+use ir::Statement;
 use super::Frame;
 use temp::{Label, Temp};
 
@@ -303,6 +304,51 @@ impl Frame for X86_64 {
         Call(Box::new(Name(Label::with_name(name))), arguments)
     }
 
+    fn proc_entry_exit1(&mut self, mut statement: Statement) -> Statement {
+        let mut start_statements = vec![];
+        let mut end_statements = vec![];
+
+        let mut saved_register_locations = vec![];
+        for register in Self::callee_saved_registers().into_iter() {
+            let local = Temp::new();
+            let memory = Exp::Temp(local);
+            saved_register_locations.push(memory.clone());
+            start_statements.push(Statement::Move(memory, Exp::Temp(register)));
+        }
+
+        let arg_registers = Self::arg_registers();
+        let arg_registers_len = arg_registers.len();
+        for (formal, arg_register) in self.formals.iter().zip(arg_registers) {
+            let destination = self.exp(formal.clone(), Exp::Temp(Self::fp()));
+            start_statements.push(Statement::Move(destination, Exp::Temp(arg_register)));
+        }
+        for (index, formal) in self.formals.iter().skip(arg_registers_len).enumerate() {
+            let destination = self.exp(formal.clone(), Exp::Temp(Self::fp()));
+            start_statements.push(Statement::Move(destination, Exp::Mem(Box::new(
+                Exp::BinOp {
+                    left: Box::new(Exp::Temp(Self::fp())),
+                    op: Plus,
+                    right: Box::new(Exp::Const(Self::WORD_SIZE * (index + 2) as i64)),
+                }
+            ))));
+        }
+
+        for (register, location) in Self::callee_saved_registers().into_iter().zip(saved_register_locations) {
+            end_statements.push(Statement::Move(Exp::Temp(register), location));
+        }
+
+        let mut end_statement = Statement::Exp(Exp::Const(0));
+        for statement in end_statements {
+            end_statement = Statement::Sequence(Box::new(end_statement), Box::new(statement));
+        }
+
+        for new_statement in start_statements.into_iter().rev() {
+            statement = Statement::Sequence(Box::new(new_statement), Box::new(statement));
+        }
+
+        Statement::Sequence(Box::new(statement), Box::new(end_statement))
+    }
+
     fn proc_entry_exit2(&self, mut instructions: Vec<Instruction>) -> Vec<Instruction> {
         let mut source = Self::callee_saved_registers();
         source.extend(Self::special_registers());
@@ -314,7 +360,6 @@ impl Frame for X86_64 {
         };
         instructions.push(instruction);
 
-        // Problably so that the register allocator does not use them.
         for instruction in &mut instructions {
             match *instruction {
                 Instruction::Label { .. } => (),
@@ -342,5 +387,23 @@ impl Frame for X86_64 {
         }
 
         instructions
+    }
+
+    fn proc_entry_exit3(&self, body: Vec<Instruction>) -> Subroutine {
+        let mut stack_size = -self.pointer;
+        if stack_size % 16 != 0 {
+            // Align the stack of 16 bytes.
+            stack_size = (stack_size & !0xF) + 0x10;
+        }
+
+        Subroutine { // FIXME: saving to rbp is apparently not needed in 64-bit.
+            prolog: format!("{}:
+    push rbp
+    mov rbp, rsp
+    sub rsp, {}", self.name(), stack_size),
+            body,
+            epilog: "leave
+    ret".to_string(),
+        }
     }
 }
