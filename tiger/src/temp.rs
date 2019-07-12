@@ -21,6 +21,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
+use frame::Frame;
 use self::Label::{Named, Num};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -37,6 +38,12 @@ impl Temp {
                 num: COUNTER,
             }
         }
+    }
+
+    pub fn to_string<F: Frame>(&self) -> String {
+        F::special_name(*self)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("t{}", self.num))
     }
 }
 

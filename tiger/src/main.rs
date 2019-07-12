@@ -19,6 +19,10 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#![feature(box_patterns)]
+
+mod asm;
+mod asm_gen;
 mod ast;
 mod canon;
 mod env;
@@ -42,11 +46,12 @@ use std::fs::File;
 use std::io::BufReader;
 use std::rc::Rc;
 
+use asm_gen::Gen;
 use canon::{basic_blocks, linearize, trace_schedule};
 use env::Env;
 use error::Error;
 use escape::find_escapes;
-use frame::Fragment;
+use frame::{Fragment, Frame};
 use frame::x86_64::X86_64;
 use lexer::Lexer;
 use symbol::{Strings, Symbols};
@@ -82,11 +87,23 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
 
         for fragment in fragments {
             match fragment {
-                Fragment::Function { body, .. } => {
+                Fragment::Function { body, frame } => {
+                    let frame = frame.borrow_mut();
+
                     let statements = linearize(body);
                     let (basic_blocks, done_label) = basic_blocks(statements);
                     let statements = trace_schedule(basic_blocks, done_label);
-                    println!("{:#?}", statements);
+
+                    let mut generator = Gen::new();
+                    for statement in statements {
+                        generator.munch_statement(statement);
+                    }
+                    let instructions = generator.get_result();
+                    let instructions = frame.proc_entry_exit2(instructions);
+
+                    for instruction in instructions {
+                        println!("{}", instruction.to_string::<X86_64>());
+                    }
                 },
                 Fragment::Str(_, _) => (),
             }

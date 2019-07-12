@@ -22,6 +22,7 @@
 use std::collections::HashMap;
 use std::sync::Once;
 
+use asm::Instruction;
 use ir::BinOp::Plus;
 use ir::Exp:: {
     self,
@@ -111,6 +112,13 @@ impl X86_64 {
 
     fn caller_saved_registers() -> Vec<Temp> {
         vec![Self::r10(), Self::r11()]
+    }
+
+    pub fn calldefs() -> Vec<Temp> {
+        let mut registers = Self::caller_saved_registers();
+        registers.extend(Self::arg_registers());
+        registers.push(Self::return_value());
+        registers
     }
 
     pub fn rsp() -> Temp {
@@ -293,5 +301,46 @@ impl Frame for X86_64 {
 
     fn external_call(name: &str, arguments: Vec<Exp>) -> Exp {
         Call(Box::new(Name(Label::with_name(name))), arguments)
+    }
+
+    fn proc_entry_exit2(&self, mut instructions: Vec<Instruction>) -> Vec<Instruction> {
+        let mut source = Self::callee_saved_registers();
+        source.extend(Self::special_registers());
+        let instruction = Instruction::Operation {
+            assembly: String::new(),
+            source,
+            destination: vec![],
+            jump: Some(vec![]),
+        };
+        instructions.push(instruction);
+
+        // Problably so that the register allocator does not use them.
+        for instruction in &mut instructions {
+            match *instruction {
+                Instruction::Label { .. } => (),
+                Instruction::Move { ref mut destination, .. } |
+                    Instruction::Operation { ref mut destination, .. } =>
+                {
+                    destination.push(Self::rbp());
+                    destination.push(Self::rsp());
+                    break;
+                },
+            }
+        }
+
+        for instruction in instructions.iter_mut().rev() {
+            match *instruction {
+                Instruction::Label { .. } => (),
+                Instruction::Move { ref mut source, .. } |
+                    Instruction::Operation { ref mut source, .. } =>
+                {
+                    source.push(Self::rbp());
+                    source.push(Self::rsp());
+                    break;
+                },
+            }
+        }
+
+        instructions
     }
 }
