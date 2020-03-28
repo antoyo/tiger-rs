@@ -26,7 +26,7 @@ use self::Label::{Named, Num};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Temp {
-    num: u32,
+    pub num: u32, // TODO: remove pub.
 }
 
 impl Temp {
@@ -37,6 +37,13 @@ impl Temp {
             Self {
                 num: COUNTER,
             }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_num(num: u32) -> Self {
+        Self {
+            num,
         }
     }
 

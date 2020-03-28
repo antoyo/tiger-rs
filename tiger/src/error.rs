@@ -97,13 +97,13 @@ pub enum Error {
         pos: Pos,
         unexpected: Tok,
     },
-    UnknownToken {
-        pos: Pos,
-        start: char,
-    },
     UnexpectedType {
         kind: String,
         pos: Pos,
+    },
+    UnknownToken {
+        pos: Pos,
+        start: char,
     },
 }
 

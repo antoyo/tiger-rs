@@ -270,7 +270,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: format!("and 'd0, {}", num),
-                    source: vec![],
+                    source: vec![temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -286,7 +286,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: format!("or 'd0, {}", num),
-                    source: vec![],
+                    source: vec![temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -302,7 +302,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: format!("sal 'd0, {}", num),
-                    source: vec![],
+                    source: vec![temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -318,7 +318,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: format!("sar 'd0, {}", num),
-                    source: vec![],
+                    source: vec![temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -334,7 +334,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: format!("shr 'd0, {}", num),
-                    source: vec![],
+                    source: vec![temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -350,7 +350,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: format!("xor 'd0, {}", num),
-                    source: vec![],
+                    source: vec![temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -472,7 +472,7 @@ impl Gen {
                 self.emit(instruction);
                 let instruction = Instruction::Operation {
                     assembly: "or 'd0, 's0".to_string(),
-                    source: vec![self.munch_expression(*right)],
+                    source: vec![self.munch_expression(*right), temp],
                     destination: vec![temp],
                     jump: None,
                 };
@@ -539,16 +539,16 @@ impl Gen {
                 self.emit(instruction);
             },
             Exp::Temp(temp) => return temp,
-            Exp::Call(box Exp::Name(label), arguments) => {
+            Exp::Call { function_expr: box Exp::Name(label), arguments } => {
                 let argument_count = arguments.len();
                 let source = self.munch_args(arguments);
-                let instruction = Instruction::Operation {
+                let instruction = Instruction::Call {
                     assembly: format!("call {}", label),
                     source,
                     destination: X86_64::calldefs(),
-                    jump: None,
                 };
                 self.emit(instruction);
+
                 let instruction = Instruction::Move {
                     assembly: "mov 'd0, 's0".to_string(),
                     source: vec![X86_64::rax()],
@@ -560,22 +560,21 @@ impl Gen {
                     let stack_arg_count = argument_count - X86_64::arg_registers().len();
                     let instruction = Instruction::Operation {
                         assembly: format!("add 'd0, {}", stack_arg_count as i64 * X86_64::WORD_SIZE),
-                        source: vec![],
+                        source: vec![X86_64::rsp()],
                         destination: vec![X86_64::rsp()],
                         jump: None,
                     };
                     self.emit(instruction);
                 }
             },
-            Exp::Call(function, arguments) => {
+            Exp::Call { function_expr, arguments, .. } => {
                 let argument_count = arguments.len();
-                let mut source = vec![self.munch_expression(*function)];
+                let mut source = vec![self.munch_expression(*function_expr)];
                 source.extend(self.munch_args(arguments));
-                let instruction = Instruction::Operation {
+                let instruction = Instruction::Call {
                     assembly: "call 's0".to_string(),
                     source,
                     destination: X86_64::calldefs(),
-                    jump: None,
                 };
                 self.emit(instruction);
                 let instruction = Instruction::Move {
@@ -589,7 +588,7 @@ impl Gen {
                     let stack_arg_count = argument_count - X86_64::arg_registers().len();
                     let instruction = Instruction::Operation {
                         assembly: format!("add 'd0, {}", stack_arg_count as i64 * X86_64::WORD_SIZE),
-                        source: vec![],
+                        source: vec![X86_64::rsp()],
                         destination: vec![X86_64::rsp()],
                         jump: None,
                     };
@@ -755,7 +754,7 @@ impl Gen {
 
             // Error cases:
             Statement::Move(Exp::Const(_), _) | Statement::Move(Exp::Error, _) | Statement::Move(Exp::Name(_), _) |
-                Statement::Move(Exp::BinOp { .. }, _) | Statement::Move(Exp::Call(_, _), _) |
+                Statement::Move(Exp::BinOp { .. }, _) | Statement::Move(Exp::Call { .. }, _) |
                 Statement::Move(Exp::ExpSequence(_, _), _) => unreachable!("{:#?}", statement),
         }
     }

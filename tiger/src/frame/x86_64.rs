@@ -104,11 +104,11 @@ impl X86_64 {
     }
 
     fn callee_saved_registers() -> Vec<Temp> {
-        vec![Self::rbx(), Self::rbp(), Self::r12(), Self::r13(), Self::r14(), Self::r15()]
+        vec![Self::rbx(), Self::r12(), Self::r13(), Self::r14(), Self::r15()]
     }
 
     fn special_registers() -> Vec<Temp> {
-        vec![Self::rax(), Self::rsp()]
+        vec![Self::rax(), Self::rbp(), Self::rsp()]
     }
 
     fn caller_saved_registers() -> Vec<Temp> {
@@ -210,7 +210,6 @@ impl Frame for X86_64 {
 
     fn registers() -> Vec<Temp> {
         let mut registers = Self::arg_registers();
-        registers.push(Self::return_value());
         registers.extend(Self::callee_saved_registers());
         registers.extend(Self::special_registers());
         registers.extend(Self::caller_saved_registers());
@@ -301,7 +300,10 @@ impl Frame for X86_64 {
     }
 
     fn external_call(name: &str, arguments: Vec<Exp>) -> Exp {
-        Call(Box::new(Name(Label::with_name(name))), arguments)
+        Call {
+            function_expr: Box::new(Name(Label::with_name(name))),
+            arguments,
+        }
     }
 
     fn proc_entry_exit1(&mut self, mut statement: Statement) -> Statement {
@@ -328,7 +330,7 @@ impl Frame for X86_64 {
                 Exp::BinOp {
                     left: Box::new(Exp::Temp(Self::fp())),
                     op: Plus,
-                    right: Box::new(Exp::Const(Self::WORD_SIZE * (index + 2) as i64)),
+                    right: Box::new(Exp::Const(Self::WORD_SIZE * (index + 2) as i64)), // TODO: explain why + 2. Maybe because + 1 is the return address?
                 }
             ))));
         }
@@ -350,6 +352,7 @@ impl Frame for X86_64 {
     }
 
     fn proc_entry_exit2(&self, mut instructions: Vec<Instruction>) -> Vec<Instruction> {
+        // TODO: explain why we push a new empty instruction with this source.
         let mut source = Self::callee_saved_registers();
         source.extend(Self::special_registers());
         let instruction = Instruction::Operation {
@@ -360,23 +363,27 @@ impl Frame for X86_64 {
         };
         instructions.push(instruction);
 
-        for instruction in &mut instructions {
-            match *instruction {
-                Instruction::Label { .. } => (),
-                Instruction::Move { ref mut destination, .. } |
-                    Instruction::Operation { ref mut destination, .. } =>
-                {
-                    destination.push(Self::rbp());
-                    destination.push(Self::rsp());
-                    break;
-                },
-            }
-        }
+        // TODO: add comment to explain why rbp and rsp are added as destination.
+        // Problably so that the register allocator does not use them.
+        // FIXME: does not seem to work, though.
+        let mut destination = vec![];
+        destination.push(Self::rsp());
+        destination.push(Self::rbp());
+        destination.extend(Self::callee_saved_registers());
+        destination.extend(Self::arg_registers());
+        let instruction = Instruction::Operation {
+            assembly: String::new(),
+            source: vec![],
+            destination,
+            jump: Some(vec![]),
+        };
+        instructions.insert(0, instruction);
 
         for instruction in instructions.iter_mut().rev() {
             match *instruction {
                 Instruction::Label { .. } => (),
-                Instruction::Move { ref mut source, .. } |
+                Instruction::Call { ref mut source, .. } |
+                    Instruction::Move { ref mut source, .. } |
                     Instruction::Operation { ref mut source, .. } =>
                 {
                     source.push(Self::rbp());

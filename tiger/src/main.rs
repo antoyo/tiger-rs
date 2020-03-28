@@ -19,13 +19,21 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+/*
+ * TODO: escape ' in assembly strings.
+ * FIXME: rdi calle-save register does not seem to be restored (useless spill?).
+ * TODO: Clean mov rbx, [rbp + -16] into mov rbx, [rbp - 16].
+ * TODO: emit mov, push, mov, push instead of mov, mov, push, push.
+ * FIXME: escape analysis (tests/functions.tig) where argument are put in the frame.
+ */
+
+#![allow(unknown_lints)]
 #![feature(box_patterns)]
 
 mod asm;
 mod asm_gen;
 mod ast;
 mod canon;
-mod color;
 mod env;
 mod error;
 mod escape;
@@ -139,9 +147,12 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         let instructions = alloc::<X86_64>(instructions, &mut *frame);
 
                         let subroutine = frame.proc_entry_exit3(instructions);
-                        writeln!(file, "    {}", subroutine.prolog)?;
+                        writeln!(file, "{}", subroutine.prolog)?;
                         for instruction in subroutine.body {
-                            writeln!(file, "    {}", instruction.to_string::<X86_64>())?;
+                            let instruction = instruction.to_string::<X86_64>();
+                            if !instruction.is_empty() {
+                                writeln!(file, "    {}", instruction)?;
+                            }
                         }
                         writeln!(file, "    {}", subroutine.epilog)?;
                     },

@@ -24,6 +24,11 @@ use temp::{Label, Temp};
 
 #[derive(Debug)]
 pub enum Instruction {
+    Call {
+        assembly: String,
+        destination: Vec<Temp>,
+        source: Vec<Temp>,
+    },
     Operation {
         assembly: String,
         destination: Vec<Temp>,
@@ -45,7 +50,8 @@ impl Instruction {
     pub fn to_string<F: Frame>(&self) -> String {
         match *self {
             Instruction::Label { ref assembly, .. } => assembly.clone(),
-            Instruction::Move { ref assembly, ref destination, ref source } |
+            Instruction::Call { ref assembly, ref destination, ref source, .. } |
+                Instruction::Move { ref assembly, ref destination, ref source } |
                 Instruction::Operation { ref assembly, ref destination, ref source, .. } =>
             {
                 let mut result = assembly.clone();

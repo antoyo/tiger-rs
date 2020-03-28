@@ -36,7 +36,10 @@ pub enum Exp {
         right: Box<Exp>,
     },
     Mem(Box<Exp>),
-    Call(Box<Exp>, Vec<Exp>),
+    Call {
+        arguments: Vec<Exp>,
+        function_expr: Box<Exp>,
+    },
     ExpSequence(Box<Statement>, Box<Exp>),
 }
 

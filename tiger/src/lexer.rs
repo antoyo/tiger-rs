@@ -327,6 +327,7 @@ impl<R: Read> Lexer<R> {
         Ok(buffer)
     }
 
+    #[allow(cyclomatic_complexity)]
     pub fn token(&mut self) -> Result<Token> {
         if let Some(&Ok(ch)) = self.bytes_iter.peek() {
             return match ch {

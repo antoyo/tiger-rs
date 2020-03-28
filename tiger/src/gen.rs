@@ -140,19 +140,19 @@ pub fn field_access<F: Frame>(var: Exp, field_index: usize) -> Exp {
     }))
 }
 
-pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut args: Vec<Exp>, parent_level: &Level<F>,
+pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut arguments: Vec<Exp>, parent_level: &Level<F>,
     current_level: &Level<F>) -> Exp
 {
     if *current_level == *parent_level {
         // For a recursive call, we simply pass the current static link, which represents the stack
         // frame of the parent function.
         let frame = current_level.current.borrow();
-        args.push(frame.exp(frame.formals().last().expect("static link").clone(), Exp::Temp(F::fp())));
+        arguments.push(frame.exp(frame.formals().last().expect("static link").clone(), Exp::Temp(F::fp())));
     }
     else if current_level.parent.as_ref().map(|level| &**level) == Some(parent_level) {
         // When calling a function defined in the current frame, simply pass the current frame
         // pointer for the static link.
-        args.push(Exp::Temp(F::fp()));
+        arguments.push(Exp::Temp(F::fp()));
     }
     else {
         // When calling a function defined in a parent frame, go up throught the static links.
@@ -171,9 +171,12 @@ pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut args: Vec<
                 None => break,
             }
         }
-        args.push(var);
+        arguments.push(var);
     }
-    Call(Box::new(Name(label.clone())), args)
+    Call {
+        arguments,
+        function_expr: Box::new(Name(label.clone())),
+    }
 }
 
 pub fn goto(label: Label) -> Exp {

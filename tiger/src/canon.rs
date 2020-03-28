@@ -257,7 +257,7 @@ fn reorder1(expr: Exp) -> (Statement, Exp) {
 }
 
 fn reorder2(expr1: Exp, expr2: Exp) -> (Statement, Exp, Exp) {
-    if let Exp::Call(_, _) = expr1 {
+    if let Exp::Call { .. } = expr1 {
         let temp = Temp::new();
         return reorder2(Exp::ExpSequence(
             Box::new(Statement::Move(Exp::Temp(temp), expr1)),
@@ -290,7 +290,7 @@ fn reorder(mut exprs: VecDeque<Exp>) -> (Statement, VecDeque<Exp>) {
         return (Statement::Exp(Exp::Const(0)), VecDeque::new());
     }
 
-    if let Exp::Call(_, _) = exprs.front().expect("front") {
+    if let Exp::Call { .. } = exprs.front().expect("front") {
         let temp = Temp::new();
         let function = exprs.pop_front().expect("pop front");
         exprs.push_front(Exp::ExpSequence(
@@ -359,15 +359,18 @@ fn do_statement(statement: Statement) -> Statement {
                 true_label,
                 false_label,
             }),
-        Statement::Move(Exp::Temp(temp), Exp::Call(function, arguments)) => {
+        Statement::Move(Exp::Temp(temp), Exp::Call { function_expr, arguments }) => {
             let mut exprs = VecDeque::new();
-            exprs.push_back(*function);
+            exprs.push_back(*function_expr);
             exprs.extend(arguments);
             reorder_statement(exprs, |mut exprs| {
                 let function = exprs.pop_front().expect("pop front");
                 let exprs = exprs.into_iter().collect();
                 Statement::Move(Exp::Temp(temp),
-                    Exp::Call(Box::new(function), exprs)
+                    Exp::Call {
+                        arguments: exprs,
+                        function_expr: Box::new(function),
+                    }
                 )
             })
         }
@@ -377,14 +380,17 @@ fn do_statement(statement: Statement) -> Statement {
             reorder_statement2(*mem, expr, |mem, expr| Statement::Move(Exp::Mem(Box::new(mem)), expr)),
         Statement::Move(Exp::ExpSequence(statement, expr1), expr2) =>
             do_statement(Statement::Sequence(statement, Box::new(Statement::Move(*expr1, expr2)))),
-        Statement::Exp(Exp::Call(function, arguments)) => {
+        Statement::Exp(Exp::Call { function_expr, arguments }) => {
             let mut exprs = VecDeque::new();
-            exprs.push_back(*function);
+            exprs.push_back(*function_expr);
             exprs.extend(arguments);
             reorder_statement(exprs, |mut exprs| {
                 let function = exprs.pop_front().expect("pop front");
                 let exprs = exprs.into_iter().collect();
-                Statement::Exp(Exp::Call(Box::new(function), exprs))
+                Statement::Exp(Exp::Call {
+                    function_expr: Box::new(function),
+                    arguments: exprs,
+                })
             })
         },
         Statement::Exp(expr) =>
@@ -408,14 +414,17 @@ fn do_expression(expr: Exp) -> (Statement, Exp) {
             let (statements2, expr) = do_expression(*expr);
             (append(statements1, statements2), expr)
         },
-        Exp::Call(function, arguments) => {
+        Exp::Call { function_expr, arguments } => {
             let mut exprs = VecDeque::new();
-            exprs.push_back(*function);
+            exprs.push_back(*function_expr);
             exprs.extend(arguments);
             reorder_expression(exprs, |mut exprs| {
                 let function = exprs.pop_front().expect("pop front");
                 let exprs = exprs.into_iter().collect();
-                Exp::Call(Box::new(function), exprs)
+                Exp::Call {
+                    function_expr: Box::new(function),
+                    arguments: exprs,
+                }
             })
         },
         _ => (Statement::Exp(Exp::Const(0)), expr),

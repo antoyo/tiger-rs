@@ -21,7 +21,7 @@
 
 use std::ops::Deref;
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Entry(usize);
 
 impl Entry {
@@ -30,7 +30,7 @@ impl Entry {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Node<T> {
     element: T,
     predecessors: Vec<Entry>,
@@ -46,13 +46,13 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn get(&self) -> &T {
+    /*pub fn get(&self) -> &T {
         &self.element
     }
 
     pub fn predecessors(&self) -> &[Entry] {
         &self.predecessors
-    }
+    }*/
 
     pub fn successors(&self) -> &[Entry] {
         &self.successors
@@ -85,8 +85,13 @@ impl<T> Graph<T> {
     }
 
     pub fn link(&mut self, node1: Entry, node2: Entry) {
-        self.nodes[node1.index()].successors.push(node2);
-        self.nodes[node2.index()].predecessors.push(node1);
+        // TODO: we should not have these conditions.
+        if !self.nodes[node1.index()].successors.contains(&node2) {
+            self.nodes[node1.index()].successors.push(node2);
+        }
+        if !self.nodes[node2.index()].predecessors.contains(&node1) {
+            self.nodes[node2.index()].predecessors.push(node1);
+        }
     }
 
     pub fn nodes(&self) -> &[Node<T>] {

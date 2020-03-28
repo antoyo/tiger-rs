@@ -19,15 +19,17 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use asm::Instruction;
 use graph::{self, Entry, Graph};
 use temp::{Label, Temp};
 
+#[derive(Debug)]
 pub struct Node {
-    pub defines: HashSet<Temp>,
-    pub uses: HashSet<Temp>,
+    pub defines: BTreeSet<Temp>,
+    pub instruction_index: usize,
+    pub uses: BTreeSet<Temp>,
     pub is_move: bool,
 }
 
@@ -65,18 +67,19 @@ impl<'a> GraphBuilder<'a> {
             };
         let defines =
             match instruction {
-                Instruction::Move { destination, .. } | Instruction::Operation { destination, .. } =>
+                Instruction::Call { destination, .. } | Instruction::Move { destination, .. } | Instruction::Operation { destination, .. } =>
                     destination.iter().cloned().collect(),
-                _ => HashSet::new(),
+                _ => BTreeSet::new(),
             };
         let uses =
             match instruction {
-                Instruction::Move { source, .. } | Instruction::Operation { source, .. } =>
+                Instruction::Call { source, .. } | Instruction::Move { source, .. } | Instruction::Operation { source, .. } =>
                     source.iter().cloned().collect(),
-                _ => HashSet::new(),
+                _ => BTreeSet::new(),
             };
         let node = Node {
             defines,
+            instruction_index: current_index,
             uses,
             is_move,
         };

@@ -19,7 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use escape::EscapeEnv;
@@ -135,8 +135,8 @@ impl<F: Clone + Frame> Env<F> {
     }
 }
 
-pub fn external_functions() -> HashMap<&'static str, (Vec<Type>, Type)> {
-    let mut functions = HashMap::new();
+pub fn external_functions() -> BTreeMap<&'static str, (Vec<Type>, Type)> {
+    let mut functions = BTreeMap::new();
     functions.insert("print", (vec![Type::String], Type::Unit));
     functions.insert("printi", (vec![Type::Int], Type::Unit));
     functions.insert("flush", (vec![], Type::Unit));
