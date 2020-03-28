@@ -23,7 +23,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use ast::Operator;
-use frame::{Fragment, Frame};
+use data_layout::{ARRAY_DATA_LAYOUT_SIZE, RECORD_DATA_LAYOUT_SIZE};
+use frame::{Fragment, Frame, Memory};
 use ir;
 use ir::BinOp::{
     And,
@@ -51,18 +52,20 @@ use ir::RelationalOp::{
     LesserThan,
     LesserOrEqual,
 };
-use ir::Statement::{
+use ir::Statement;
+use ir::_Statement::{
     self,
     CondJump,
     Jump,
     Move,
     Sequence,
 };
-use temp::{Label, Temp};
+use temp::{Label, Temp, TempMap};
 
 #[allow(type_alias_bounds)]
 pub type Access<F: Frame> = (Level<F>, F::Access);
 
+#[derive(Debug)]
 pub struct Level<F> {
     pub current: Rc<RefCell<F>>,
     parent: Option<Box<Level<F>>>,
@@ -118,7 +121,12 @@ pub fn array_subscript<F: Frame>(var: Exp, subscript: Exp) -> Exp {
         left: Box::new(var),
         right: Box::new(BinOp {
             op: Mul,
-            left: Box::new(subscript),
+            left: Box::new(
+                BinOp {
+                    op: Plus,
+                    left: Box::new(subscript),
+                    right: Box::new(num(ARRAY_DATA_LAYOUT_SIZE as i64)),
+                }),
             right: Box::new(Const(F::WORD_SIZE)),
         }),
     }))
@@ -136,12 +144,12 @@ pub fn field_access<F: Frame>(var: Exp, field_index: usize) -> Exp {
     Mem(Box::new(BinOp {
         op: Plus,
         left: Box::new(var),
-        right: Box::new(Const(F::WORD_SIZE * field_index as i64)),
+        right: Box::new(Const(F::WORD_SIZE * (field_index + RECORD_DATA_LAYOUT_SIZE) as i64)),
     }))
 }
 
 pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>) -> Exp
+    current_level: &Level<F>, collectable_return_type: bool) -> Exp
 {
     if *current_level == *parent_level {
         // For a recursive call, we simply pass the current static link, which represents the stack
@@ -175,13 +183,15 @@ pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut arguments:
     }
     Call {
         arguments,
+        collectable_return_type,
         function_expr: Box::new(Name(label.clone())),
+        return_label: Label::new(),
     }
 }
 
 pub fn goto(label: Label) -> Exp {
     ExpSequence(
-        Box::new(Jump(Name(label.clone()), vec![label])),
+        Box::new(Jump(Name(label.clone()), vec![label]).into()),
         Box::new(unit()),
     )
 }
@@ -201,24 +211,72 @@ pub fn if_expression<F: Clone + Frame>(test_expr: Exp, if_expr: Exp, else_expr: 
                 right: Const(1),
                 true_label: true_label.clone(),
                 false_label: false_label.clone(),
-            }),
+            }.into()),
             Box::new(Sequence(
-                Box::new(Statement::Label(true_label)),
+                Box::new(_Statement::Label(true_label).into()),
                 Box::new(Sequence(
-                    Box::new(Move(result.clone(), if_expr)),
+                    Box::new(Move(result.clone(), if_expr).into()),
                     Box::new(Sequence(
-                        Box::new(Jump(Name(end_label.clone()), vec![end_label.clone()])),
+                        Box::new(Jump(Name(end_label.clone()), vec![end_label.clone()]).into()),
                         Box::new(Sequence(
-                            Box::new(Statement::Label(false_label)),
+                            Box::new(_Statement::Label(false_label).into()),
                             Box::new(Sequence(
-                                Box::new(Move(result.clone(), else_expr.unwrap_or(unit()))),
-                                Box::new(Statement::Label(end_label)),
-                            )),
-                        )),
-                    )),
-                )),
-            )),
-        )),
+                                Box::new(Move(result.clone(), else_expr.unwrap_or(unit())).into()),
+                                Box::new(_Statement::Label(end_label).into()),
+                            ).into()),
+                        ).into()),
+                    ).into()),
+                ).into()),
+            ).into()),
+        ).into()),
+        Box::new(result),
+    )
+}
+
+pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_expr: Exp, is_pointer: Exp, init_expr: Exp, level: &Level<F>) -> Exp {
+    // FIXME: it does many allocations for a 2D array.
+    let temp = Temp::new();
+    let result =
+        if let Some(var) = var.clone() {
+            let level = var.0.clone();
+            simple_var(var, &level)
+        }
+        else {
+            Exp::Temp(temp)
+        };
+    let loop_var = Exp::Temp(Temp::new());
+    let test_expr = relational_oper(Operator::Lt, loop_var.clone(), size_expr.clone(), level);
+    let init_var = Exp::Temp(Temp::new());
+    let body = Exp::ExpSequence(
+        Box::new(_Statement::Sequence(
+            Box::new(_Statement::Sequence(
+                Box::new(_Statement::Move(init_var.clone(), init_expr).into()),
+                Box::new(_Statement::Move(array_subscript::<F>(result.clone(), loop_var.clone()), init_var).into()),
+            ).into()),
+            Box::new(_Statement::Move(loop_var.clone(), BinOp {
+                op: Plus,
+                left: Box::new(loop_var.clone()),
+                right: Box::new(Const(1)),
+            }).into()),
+        ).into()),
+        Box::new(unit())
+    );
+    let init =
+        if let Some(var) = var {
+            var_dec(&var, F::external_call("initArray", vec![size_expr, is_pointer], true))
+        }
+        else {
+            Move(result.clone(), F::external_call("initArray", vec![size_expr, is_pointer], true)).into()
+        };
+    let sequence = ExpSequence(
+        Box::new(Sequence(
+            Box::new(init.into()),
+            Box::new(Move(loop_var, Const(0)).into()),
+        ).into()),
+        Box::new(while_loop(&Label::new(), test_expr, body)),
+    );
+    ExpSequence(
+        Box::new(_Statement::Exp(sequence).into()),
         Box::new(result),
     )
 }
@@ -227,26 +285,23 @@ pub fn num(number: i64) -> Exp {
     Const(number)
 }
 
-pub fn record_create<F: Frame>(fields: Vec<Exp>) -> Exp {
+pub fn record_create<F: Frame>(data_layout: Exp, fields: Vec<Exp>) -> Exp {
     if fields.is_empty() {
         return unit();
     }
-    let result = Exp::Temp(Temp::new());
-    let mut fields = fields.into_iter();
-    let mut sequence = Sequence(
-        Box::new(Move(result.clone(), F::external_call("malloc", vec![Const(fields.len() as i64 * F::WORD_SIZE)]))),
-        Box::new(Move(Mem(Box::new(result.clone())), fields.next().expect("record first field"))),
-    );
-    for (index, field) in fields.enumerate() {
-        let index = index + 1; // Plus one because the first field was emitted before the loop.
+    let temp = Temp::new();
+    let result = Exp::Temp(temp);
+    let mut sequence = Move(result.clone(), F::external_call("allocRecord", vec![data_layout], true)).into();
+    for (index, field) in fields.into_iter().enumerate() {
+        let index = index + RECORD_DATA_LAYOUT_SIZE;
         sequence = Sequence(
             Box::new(sequence),
             Box::new(Move(Mem(Box::new(BinOp {
                 op: Plus,
                 left: Box::new(result.clone()),
                 right: Box::new(Const(index as i64 * F::WORD_SIZE)),
-            })), field))
-        );
+            })), field).into())
+        ).into();
     }
     ExpSequence(
         Box::new(sequence),
@@ -269,24 +324,24 @@ pub fn relational_oper<F: Clone + Frame>(op: Operator, left: Exp, right: Exp, le
                 right: right,
                 true_label: true_label.clone(),
                 false_label: false_label.clone(),
-            }),
+            }.into()),
             Box::new(Sequence(
-                Box::new(Statement::Label(true_label)),
+                Box::new(_Statement::Label(true_label).into()),
                 Box::new(Sequence(
-                    Box::new(Move(result.clone(), Const(1))),
+                    Box::new(Move(result.clone(), Const(1)).into()),
                     Box::new(Sequence(
-                        Box::new(Jump(Name(end_label.clone()), vec![end_label.clone()])),
+                        Box::new(Jump(Name(end_label.clone()), vec![end_label.clone()]).into()),
                         Box::new(Sequence(
-                            Box::new(Statement::Label(false_label)),
+                            Box::new(_Statement::Label(false_label).into()),
                             Box::new(Sequence(
-                                Box::new(Move(result.clone(), Const(0))),
-                                Box::new(Statement::Label(end_label)),
-                            ))
-                        )),
-                    )),
-                )),
-            )),
-        )),
+                                Box::new(Move(result.clone(), Const(0)).into()),
+                                Box::new(_Statement::Label(end_label).into()),
+                            ).into())
+                        ).into()),
+                    ).into()),
+                ).into()),
+            ).into()),
+        ).into()),
         Box::new(result),
     )
 }
@@ -306,7 +361,7 @@ pub fn simple_var<F: Clone + Frame + PartialEq>(access: Access<F>, level: &Level
 }
 
 pub fn string_equality<F: Frame>(oper: Operator, left: Exp, right: Exp) -> Exp {
-    let exp = F::external_call("stringEqual", vec![left, right]);
+    let exp = F::external_call("stringEqual", vec![left, right], false);
     match oper {
         Operator::Equal => exp,
         Operator::Neq => BinOp {
@@ -325,7 +380,20 @@ pub fn unit() -> Exp {
 pub fn var_dec<F: Frame>(access: &Access<F>, value: Exp) -> Statement {
     let var_level = &access.0;
     let frame = var_level.current.borrow();
-    Move(frame.exp(access.1.clone(), Exp::Temp(F::fp())), value)
+    let dec = Move(frame.exp(access.1.clone(), Exp::Temp(F::fp())), value);
+    if let Some(pos) = access.1.as_stack() {
+        // This is for the purpose of stack variable liveness analysis.
+        Statement {
+            stack_var: Some(pos),
+            statement: dec,
+        }
+    }
+    else {
+        Statement {
+            stack_var: None,
+            statement: dec,
+        }
+    }
 }
 
 pub fn var_decs(variables: Vec<Statement>, body: Exp) -> Exp {
@@ -340,12 +408,12 @@ pub fn var_decs(variables: Vec<Statement>, body: Exp) -> Exp {
         return ExpSequence(Box::new(var1), Box::new(body));
     }
     let var2 = iter.next().expect("second variable declaration");
-    let mut statements = Sequence(Box::new(var1), Box::new(var2));
+    let mut statements = Sequence(Box::new(var1), Box::new(var2)).into();
     for var in iter {
         statements = Sequence(
             Box::new(statements),
             Box::new(var),
-        );
+        ).into();
     }
     ExpSequence(Box::new(statements), Box::new(body))
 }
@@ -356,7 +424,7 @@ pub fn while_loop(done_label: &Label, test_expr: Exp, body: Exp) -> Exp {
     ExpSequence(
         Box::new(Sequence(
             Box::new(Sequence(
-                Box::new(Statement::Label(test_label.clone())),
+                Box::new(_Statement::Label(test_label.clone()).into()),
                 Box::new(Sequence(
                     Box::new(Sequence(
                         Box::new(CondJump {
@@ -365,17 +433,17 @@ pub fn while_loop(done_label: &Label, test_expr: Exp, body: Exp) -> Exp {
                             right: Const(1),
                             true_label: done_label.clone(),
                             false_label: after_check_label.clone(),
-                        }),
-                        Box::new(Statement::Label(after_check_label)),
-                    )),
+                        }.into()),
+                        Box::new(_Statement::Label(after_check_label).into()),
+                    ).into()),
                     Box::new(Sequence(
-                        Box::new(Statement::Exp(body)),
-                        Box::new(Jump(Name(test_label.clone()), vec![test_label])),
-                    )),
-                )),
-            )),
-            Box::new(Statement::Label(done_label.clone())),
-        )),
+                        Box::new(_Statement::Exp(body).into()),
+                        Box::new(Jump(Name(test_label.clone()), vec![test_label]).into()),
+                    ).into()),
+                ).into()),
+            ).into()),
+            Box::new(_Statement::Label(done_label.clone()).into()),
+        ).into()),
         Box::new(unit()),
     )
 }
@@ -419,11 +487,13 @@ impl<F:Frame> Gen<F> {
         self.fragments
     }
 
-    pub fn proc_entry_exit(&mut self, level: &Level<F>, body: Exp) {
-        let body = Move(Exp::Temp(F::return_value()), body);
+    pub fn proc_entry_exit(&mut self, level: &Level<F>, body: Exp, temp_map: TempMap, escaping_vars: Vec<i64>) {
+        let body = Move(Exp::Temp(F::return_value()), body).into();
         self.fragments.push(Fragment::Function {
             body,
+            escaping_vars,
             frame: level.current.clone(),
+            temp_map,
         });
     }
 

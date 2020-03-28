@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2019-2020 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -19,6 +19,9 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#![feature(asm)]
+#![cfg(not(test))]
+
 /*
  * Compile with:
  cargo run -- tests/hello.tig
@@ -30,61 +33,111 @@
                       -lgcc_s --no-as-needed /usr/lib/crtn.o
  */
 
-use std::ffi::{CStr, CString};
+mod collector;
+mod data_layout;
+
+use std::ffi::CStr;
 //use std::process;
 use std::io::{Read, Write, stdin, stdout};
+use std::os::raw::c_char;
+
+use collector::{Layout, GARBAGE_COLLECTOR};
+use data_layout::STRING_DATA_LAYOUT_SIZE;
+
+const WORD_SIZE: usize = 8;
 
 /*extern {
     fn main();
 }*/
 
 #[no_mangle]
-extern fn ord(string: *const i8) -> i64 {
-    let cstring = unsafe { CStr::from_ptr(string) };
+extern fn ord(string: *const c_char) -> i64 {
+    let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
     cstring.to_str().expect("cstr to_str").chars().next().expect("ord string is empty") as i64
 }
 
 #[no_mangle]
-extern fn chr(num: i64) -> *const i8 {
-    let char = num as u8 as char;
-    let cstring = CString::new(char.to_string()).expect("CString::new");
-    cstring.into_raw()
+extern fn chr(num: i64) -> *const c_char {
+    let char = num as u8;
+    let ptr = GARBAGE_COLLECTOR.with(|collector| {
+        collector.borrow_mut().allocate(Layout::String(1))
+    });
+    let string = ptr as *mut c_char;
+    unsafe {
+        let string_ptr = string_offset(string) as *mut c_char;
+        *string_ptr = char as c_char;
+        let string_ptr = string_ptr.offset(1);
+        *string_ptr = 0;
+    }
+    string
 }
 
 #[no_mangle]
-extern fn getchar() -> *const i8 {
+extern fn getchar() -> *const c_char {
     let stdin = stdin();
     let char = stdin.bytes().next().expect("next char").expect("read stdin") as char;
-    let cstring = CString::new(char.to_string()).expect("CString::new");
-    cstring.into_raw()
+
+    let ptr = GARBAGE_COLLECTOR.with(|collector| {
+        collector.borrow_mut().allocate(Layout::String(1))
+    });
+    let string = ptr as *mut c_char;
+    unsafe {
+        let string_ptr = string_offset(string) as *mut c_char;
+        *string_ptr = char as c_char;
+        let string_ptr = string_ptr.offset(1);
+        *string_ptr = 0;
+    }
+    string
 }
 
 #[no_mangle]
-extern fn concat(string1: *const i8, string2: *const i8) -> *const i8 {
-    let cstring1 = unsafe { CStr::from_ptr(string1) };
-    let cstring2 = unsafe { CStr::from_ptr(string2) };
+extern fn concat(string1: *const c_char, string2: *const c_char) -> *const c_char {
+    let cstring1 = unsafe { CStr::from_ptr(string_offset(string1)) };
+    let cstring2 = unsafe { CStr::from_ptr(string_offset(string2)) };
     let mut string1 = cstring1.to_str().expect("to_str").to_string();
     let string2 = cstring2.to_str().expect("to_str").to_string();
     string1.push_str(&string2);
-    let cstring = CString::new(string1).expect("CString::new");
-    cstring.into_raw()
+
+    let length = string1.len();
+    let ptr = GARBAGE_COLLECTOR.with(|collector| {
+        collector.borrow_mut().allocate(Layout::String(length))
+    });
+    let string = ptr as *mut c_char;
+    unsafe {
+        let mut string_ptr = string_offset(string) as *mut c_char;
+        for byte in string1.as_bytes() {
+            *string_ptr = *byte as c_char;
+            string_ptr = string_ptr.offset(1);
+        }
+        *string_ptr = 0;
+    }
+    string
 }
 
 #[no_mangle]
-extern fn stringEqual(string1: *const i8, string2: *const i8) -> i64 {
-    let cstring1 = unsafe { CStr::from_ptr(string1) };
-    let cstring2 = unsafe { CStr::from_ptr(string2) };
+extern fn stringEqual(string1: *const c_char, string2: *const c_char) -> i64 {
+    let cstring1 = unsafe { CStr::from_ptr(string_offset(string1)) };
+    let cstring2 = unsafe { CStr::from_ptr(string_offset(string2)) };
     (cstring1 == cstring2) as i64
 }
 
 #[no_mangle]
-extern fn initArray(length: usize, init_value: i64) -> i64 {
-    Box::into_raw(vec![init_value; length].into_boxed_slice()) as *mut i64 as i64
+extern fn allocRecord(data_layout: *const c_char) -> i64 {
+    GARBAGE_COLLECTOR.with(|collector| {
+        collector.borrow_mut().allocate(Layout::Record(data_layout))
+    })
 }
 
 #[no_mangle]
-extern fn print(string: *const i8) {
-    let cstring = unsafe { CStr::from_ptr(string) };
+extern fn initArray(length: usize, is_pointer: i64) -> i64 {
+    GARBAGE_COLLECTOR.with(|collector| {
+        collector.borrow_mut().allocate(Layout::Array(length, is_pointer != 0))
+    })
+}
+
+#[no_mangle]
+extern fn print(string: *const c_char) {
+    let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
     if let Ok(string) = cstring.to_str() {
         print!("{}", string);
     }
@@ -94,6 +147,14 @@ extern fn print(string: *const i8) {
 #[no_mangle]
 extern fn printi(num: i32) {
     println!("{}", num);
+}
+
+// Get the pointer where the string starts, i.e. after the data layout.
+fn string_offset(ptr: *const c_char) -> *const c_char {
+    let ptr = ptr as *const usize;
+    unsafe {
+        ptr.offset(STRING_DATA_LAYOUT_SIZE as isize) as *const c_char
+    }
 }
 
 /*#[no_mangle]

@@ -1,0 +1,103 @@
+let type Point = {
+        x: int,
+        y: int
+    }
+    type strings = array of string
+    type Vec3D = {
+        x: int,
+        y: int,
+        z: int,
+        names: strings
+    }
+    var point := Point {
+        x = 42,
+        y = 24
+    }
+    var origin := Point {
+        x = 0,
+        y = 0
+    }
+    function f() : Point =
+        Point {
+            x = 0,
+            y = 2
+        }
+    function g() : Point =
+        let var p := f()
+        in
+            p.x := 4;
+            p
+        end
+    function h() : Point =
+        let var p := g()
+        in
+            p.y := 12;
+            p
+        end
+    var p10 := h()
+    type vecArray = array of Vec3D
+    var array_of_vec := vecArray[13] of Vec3D {
+        x = 1,
+        y = 2,
+        z = 3,
+        names = strings[42] of "array_of_vec"
+    }
+    var string := concat("Hello, ", "World\n")
+    type list = {first: int, rest: list}
+    var list := list { first = 42, rest = nil }
+in (
+    for i := 0 to 50 do
+        let var origin := Point {
+                x = 20,
+                y = 21
+            }
+            var p2 := Point {
+                x = 22,
+                y = 23
+            }
+            var p3 := Point {
+                x = 24,
+                y = 25
+            }
+            var p4 := Point {
+                x = 26,
+                y = 27
+            }
+            type intArray = array of int
+            var a := intArray[12] of 14
+            var b := vecArray[12] of Vec3D {
+                x = 1,
+                y = 2,
+                z = 3,
+                names = strings[22] of "b vecArray"
+            }
+            var list := list { first = 43, rest = nil }
+        in
+            list := list { first = 25, rest = list };
+            printi(i);
+            printi(origin.x);
+            printi(p2.x);
+            printi(p3.x);
+            printi(p4.x);
+            printi(a[3]);
+            printi(b[3].z);
+            printi(list.first);
+            print(b[11].names[20]);
+            print("\n")
+        end;
+    list := list { first = 24, rest = list };
+    printi(point.x);
+    printi(point.y);
+    point.y := 100;
+    printi(point.x);
+    printi(point.y);
+    point.x := 200;
+    printi(point.x);
+    printi(point.y);
+    printi(p10.x);
+    printi(p10.y);
+    printi(array_of_vec[10].y);
+    print(string);
+    printi(list.first)
+)
+end

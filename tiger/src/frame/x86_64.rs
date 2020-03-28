@@ -32,15 +32,15 @@ use ir::Exp:: {
     Mem,
     Name,
 };
-use ir::Statement;
-use super::Frame;
+use ir::{Statement, _Statement};
+use super::{Frame, Memory};
 use temp::{Label, Temp};
 
 use self::Access::{InFrame, InReg};
 
 const POINTER_SIZE: i64 = 8;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct X86_64 {
     formals: Vec<Access>, // Representation of parameters.
     name: Label,
@@ -53,10 +53,26 @@ impl PartialEq for X86_64 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Access {
     InFrame(i64),
     InReg(Temp),
+}
+
+impl Memory for Access {
+    fn as_stack(&self) -> Option<i64> {
+        match *self {
+            InFrame(stack_location) => Some(stack_location),
+            InReg(_) => None,
+        }
+    }
+
+    fn as_temp(&self) -> Option<&Temp> {
+        match *self {
+            InFrame(_) => None,
+            InReg(ref temp) => Some(temp),
+        }
+    }
 }
 
 static mut RBP: Option<Temp> = None;
@@ -299,10 +315,12 @@ impl Frame for X86_64 {
         }
     }
 
-    fn external_call(name: &str, arguments: Vec<Exp>) -> Exp {
+    fn external_call(name: &str, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp {
         Call {
+            collectable_return_type,
             function_expr: Box::new(Name(Label::with_name(name))),
             arguments,
+            return_label: Label::new(),
         }
     }
 
@@ -315,43 +333,43 @@ impl Frame for X86_64 {
             let local = Temp::new();
             let memory = Exp::Temp(local);
             saved_register_locations.push(memory.clone());
-            start_statements.push(Statement::Move(memory, Exp::Temp(register)));
+            start_statements.push(_Statement::Move(memory, Exp::Temp(register)).into());
         }
 
         let arg_registers = Self::arg_registers();
         let arg_registers_len = arg_registers.len();
         for (formal, arg_register) in self.formals.iter().zip(arg_registers) {
             let destination = self.exp(formal.clone(), Exp::Temp(Self::fp()));
-            start_statements.push(Statement::Move(destination, Exp::Temp(arg_register)));
+            start_statements.push(_Statement::Move(destination, Exp::Temp(arg_register)).into());
         }
         for (index, formal) in self.formals.iter().skip(arg_registers_len).enumerate() {
             let destination = self.exp(formal.clone(), Exp::Temp(Self::fp()));
-            start_statements.push(Statement::Move(destination, Exp::Mem(Box::new(
+            start_statements.push(_Statement::Move(destination, Exp::Mem(Box::new(
                 Exp::BinOp {
                     left: Box::new(Exp::Temp(Self::fp())),
                     op: Plus,
                     right: Box::new(Exp::Const(Self::WORD_SIZE * (index + 2) as i64)), // TODO: explain why + 2. Maybe because + 1 is the return address?
                 }
-            ))));
+            ))).into());
         }
 
         for (register, location) in Self::callee_saved_registers().into_iter().zip(saved_register_locations) {
-            end_statements.push(Statement::Move(Exp::Temp(register), location));
+            end_statements.push(_Statement::Move(Exp::Temp(register), location).into());
         }
 
-        let mut end_statement = Statement::Exp(Exp::Const(0));
+        let mut end_statement = _Statement::Exp(Exp::Const(0)).into();
         for statement in end_statements {
-            end_statement = Statement::Sequence(Box::new(end_statement), Box::new(statement));
+            end_statement = _Statement::Sequence(Box::new(end_statement), Box::new(statement)).into();
         }
 
         for new_statement in start_statements.into_iter().rev() {
-            statement = Statement::Sequence(Box::new(new_statement), Box::new(statement));
+            statement = _Statement::Sequence(Box::new(new_statement), Box::new(statement)).into();
         }
 
-        Statement::Sequence(Box::new(statement), Box::new(end_statement))
+        _Statement::Sequence(Box::new(statement), Box::new(end_statement)).into()
     }
 
-    fn proc_entry_exit2(&self, mut instructions: Vec<Instruction>) -> Vec<Instruction> {
+    fn proc_entry_exit2(&self, mut instructions: Vec<Instruction>, escaping_vars: Vec<i64>) -> Vec<Instruction> {
         // TODO: explain why we push a new empty instruction with this source.
         let mut source = Self::callee_saved_registers();
         source.extend(Self::special_registers());
@@ -360,6 +378,8 @@ impl Frame for X86_64 {
             source,
             destination: vec![],
             jump: Some(vec![]),
+            stack_destination: vec![],
+            stack_source: escaping_vars,
         };
         instructions.push(instruction);
 
@@ -376,6 +396,8 @@ impl Frame for X86_64 {
             source: vec![],
             destination,
             jump: Some(vec![]),
+            stack_destination: vec![],
+            stack_source: vec![],
         };
         instructions.insert(0, instruction);
 

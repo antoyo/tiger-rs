@@ -29,7 +29,10 @@ use temp::{Label, Temp};
 pub struct Node {
     pub defines: BTreeSet<Temp>,
     pub instruction_index: usize,
+    pub stack_defines: BTreeSet<i64>,
+    pub stack_uses: BTreeSet<i64>,
     pub uses: BTreeSet<Temp>,
+    pub return_label: Option<Label>,
     pub is_move: bool,
 }
 
@@ -60,6 +63,11 @@ impl<'a> GraphBuilder<'a> {
         }
 
         let instruction = &self.instructions[current_index];
+        let return_label =
+            match instruction {
+                Instruction::Call { return_label, .. } => Some(return_label.clone()),
+                _ => None,
+            };
         let is_move =
             match instruction {
                 Instruction::Move { .. } => true,
@@ -77,9 +85,24 @@ impl<'a> GraphBuilder<'a> {
                     source.iter().cloned().collect(),
                 _ => BTreeSet::new(),
             };
+        let stack_defines =
+            match instruction {
+                Instruction::Operation { stack_destination, .. } | Instruction::Move { stack_destination, .. } =>
+                    stack_destination.iter().cloned().collect(),
+                _ => BTreeSet::new(),
+            };
+        let stack_uses =
+            match instruction {
+                Instruction::Move { stack_source, .. } | Instruction::Operation { stack_source, .. } =>
+                    stack_source.iter().cloned().collect(),
+                _ => BTreeSet::new(),
+            };
         let node = Node {
             defines,
             instruction_index: current_index,
+            return_label,
+            stack_defines,
+            stack_uses,
             uses,
             is_move,
         };

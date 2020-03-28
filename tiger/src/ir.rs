@@ -38,13 +38,30 @@ pub enum Exp {
     Mem(Box<Exp>),
     Call {
         arguments: Vec<Exp>,
+        collectable_return_type: bool,
         function_expr: Box<Exp>,
+        return_label: Label,
     },
     ExpSequence(Box<Statement>, Box<Exp>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Statement {
+pub struct Statement {
+    pub stack_var: Option<i64>,
+    pub statement: _Statement,
+}
+
+impl From<_Statement> for Statement {
+    fn from(statement: _Statement) -> Self {
+        Self {
+            stack_var: None,
+            statement: statement,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum _Statement {
     Move(Exp, Exp),
     Exp(Exp),
     Jump(Exp, Vec<Label>),

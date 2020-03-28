@@ -31,8 +31,10 @@ fn test_execution() {
         "array_assignment",
         "comments",
         "conditions",
+        "cycle",
         "escapes",
         "functions",
+        "gc",
         "hello",
         "hello1",
         "hello2",
@@ -68,8 +70,8 @@ fn test_execution() {
         }
         let mut buffer = vec![];
         let read_size = child.stdout.expect("stdout").read_to_end(&mut buffer).expect("output");
-        let output = &buffer[..read_size];
-        let expected_output = fs::read(format!("./tests/{}.stdout", file)).expect("read");
+        let output = String::from_utf8_lossy(&buffer[..read_size]);
+        let expected_output = String::from_utf8(fs::read(format!("./tests/{}.stdout", file)).expect("read")).expect("String::from_utf8");
         assert_eq!(output, &*expected_output, "{}.tig", file);
     }
 }

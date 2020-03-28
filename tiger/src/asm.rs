@@ -28,11 +28,14 @@ pub enum Instruction {
         assembly: String,
         destination: Vec<Temp>,
         source: Vec<Temp>,
+        return_label: Label,
     },
     Operation {
         assembly: String,
         destination: Vec<Temp>,
         source: Vec<Temp>,
+        stack_destination: Vec<i64>,
+        stack_source: Vec<i64>,
         jump: Option<Vec<Label>>,
     },
     Label {
@@ -43,6 +46,8 @@ pub enum Instruction {
         assembly: String,
         destination: Vec<Temp>,
         source: Vec<Temp>,
+        stack_destination: Vec<i64>,
+        stack_source: Vec<i64>,
     },
 }
 
@@ -51,7 +56,7 @@ impl Instruction {
         match *self {
             Instruction::Label { ref assembly, .. } => assembly.clone(),
             Instruction::Call { ref assembly, ref destination, ref source, .. } |
-                Instruction::Move { ref assembly, ref destination, ref source } |
+                Instruction::Move { ref assembly, ref destination, ref source, .. } |
                 Instruction::Operation { ref assembly, ref destination, ref source, .. } =>
             {
                 let mut result = assembly.clone();

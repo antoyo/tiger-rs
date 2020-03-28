@@ -6,6 +6,10 @@ let type Point = {
         x = 42,
         y = 24
     }
+    var origin := Point {
+        x = 0,
+        y = 0
+    }
 in (
     printi(point.x);
     printi(point.y);

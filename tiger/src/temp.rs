@@ -19,9 +19,10 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+use std::collections::BTreeSet;
 use std::fmt::{self, Display, Formatter};
 
-use frame::Frame;
+use frame::{Frame, Memory};
 use self::Label::{Named, Num};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -86,6 +87,37 @@ impl Display for Label {
         match *self {
             Named(ref name) => write!(formatter, "{}", name),
             Num(num) => write!(formatter, "l{}", num),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TempMap {
+    stack_vars: BTreeSet<i64>,
+    temps: BTreeSet<Temp>,
+}
+
+impl TempMap {
+    pub fn new() -> Self {
+        Self {
+            stack_vars: BTreeSet::new(),
+            temps: BTreeSet::new(),
+        }
+    }
+
+    pub fn contains_var(&self, stack_var: i64) -> bool {
+        self.stack_vars.contains(&stack_var)
+    }
+
+    pub fn insert<F: Frame>(&mut self, access: &F::Access) {
+        if let Some(temp) = access.as_temp() {
+            self.temps.insert(temp.clone());
+        }
+        else if let Some(stack_location) = access.as_stack() {
+            self.stack_vars.insert(stack_location);
+        }
+        else {
+            unreachable!();
         }
     }
 }

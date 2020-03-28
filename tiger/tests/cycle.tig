@@ -1,0 +1,14 @@
+let type list = {first: int, rest: list}
+    var cycle := list { first = 42, rest = nil }
+in
+    cycle.rest := cycle;
+    for i := 0 to 50 do
+        let var list := list { first = 42, rest = nil }
+        in
+            list.rest := list;
+            cycle.rest := cycle;
+            cycle.first := i;
+            printi(cycle.first)
+        end;
+    printi(cycle.first)
+end

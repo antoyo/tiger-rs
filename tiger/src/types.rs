@@ -19,6 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+use ir::Exp;
 use self::Type::*;
 use symbol::{Symbol, Symbols, SymbolWithPos};
 
@@ -26,7 +27,12 @@ use symbol::{Symbol, Symbols, SymbolWithPos};
 pub enum Type {
     Int,
     String,
-    Record(Symbol, Vec<(Symbol, Type)>, Unique),
+    Record {
+        data_layout: Exp,
+        name: Symbol,
+        types: Vec<(Symbol, Type)>,
+        unique: Unique,
+    },
     Array(Box<Type>, Unique),
     Nil,
     Unit,
@@ -50,10 +56,25 @@ impl Type {
                 }
             },
             Nil => "nil".to_string(),
-            Record(name, _, _) => format!("struct {}", symbols.name(name)),
+            Record { name, .. } => format!("struct {}", symbols.name(name)),
             String => "string".to_string(),
             Unit => "()".to_string(),
             Error => "type error".to_string(),
+        }
+    }
+
+    pub fn is_pointer(&self) -> bool {
+        match *self {
+            Array { .. } | Record { .. } | String  => true,
+            Name(_, ref typ) => {
+                if let Some(typ) = typ.as_ref() {
+                    typ.is_pointer()
+                }
+                else {
+                    false
+                }
+            },
+            _ => false,
         }
     }
 }

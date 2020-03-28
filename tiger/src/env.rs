@@ -30,7 +30,7 @@ use symbol::{Strings, Symbol, Symbols};
 use temp::Label;
 use types::Type;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Entry<F: Clone + Frame> {
     Fun {
         external: bool,
@@ -43,7 +43,6 @@ pub enum Entry<F: Clone + Frame> {
         access: Access<F>,
         typ: Type,
     },
-    Error,
 }
 
 pub struct Env<F: Clone + Frame> {
@@ -150,7 +149,7 @@ pub fn external_functions() -> BTreeMap<&'static str, (Vec<Type>, Type)> {
     functions.insert("exit", (vec![Type::Int], Type::Unit));
     functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int));
 
-    functions.insert("malloc", (vec![Type::Int], Type::Int));
+    functions.insert("allocRecord", (vec![Type::Int], Type::Int));
     functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int));
     functions
 }

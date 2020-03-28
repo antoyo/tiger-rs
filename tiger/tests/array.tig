@@ -3,7 +3,7 @@ let type intArray = array of int
     var a := intArray[len] of 0
     var b := intArray[12] of 7
     var value := a[0]
-in (
+in
     printi(value);
     a[0] := 10;
     printi(a[0]);
@@ -11,5 +11,4 @@ in (
         a[i] := i;
     for i := 0 to len - 1 do
         printi(a[i])
-)
 end

@@ -34,6 +34,7 @@ use std::result;
 
 use ast::{
     Declaration,
+    Declaration::VariableDeclaration,
     DeclarationWithPos,
     Expr,
     ExprWithPos,
@@ -52,7 +53,6 @@ use ast::{
     VarWithPos,
     dummy_var_expr,
 };
-use ast::Declaration::VariableDeclaration;
 use error::Error;
 use error::Error::UnexpectedToken;
 use lexer::Lexer;
@@ -144,6 +144,18 @@ impl<'a, R: Read> Parser<'a, R> {
             }, pos);
         }
         Ok(expr)
+    }
+
+    fn array(&mut self, size: Box<ExprWithPos>, typ: SymbolWithPos, pos: Pos) -> Result<ExprWithPos> {
+        eat!(self, Of);
+        let init = Box::new(self.expr()?);
+        let pos = pos.grow(init.pos);
+
+        Ok(WithPos::new(Expr::Array {
+            init: init.clone(),
+            size: size.clone(),
+            typ, // TODO: is this still necessary?
+        }, pos))
     }
 
     fn arr_ty(&mut self) -> Result<TyWithPos> {
@@ -465,14 +477,7 @@ impl<'a, R: Read> Parser<'a, R> {
                     Var::Subscript { expr, this } => {
                         let pos = this.pos;
                         if let Var::Simple { ident } = this.node {
-                            eat!(self, Of);
-                            let init = Box::new(self.expr()?);
-                            let pos = pos.grow(init.pos);
-                            return Ok(WithPos::new(Expr::Array {
-                                init,
-                                size: expr,
-                                typ: WithPos::new(ident.node, pos),
-                            }, pos));
+                            return self.array(expr, WithPos::new(ident.node, pos), pos);
                         }
                         else {
                             return Err(self.unexpected_token("neither dot nor subscript")?);

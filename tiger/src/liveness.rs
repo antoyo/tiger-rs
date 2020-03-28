@@ -24,35 +24,94 @@ use std::collections::{BTreeSet, BTreeMap, HashMap, HashSet};
 
 use flow::FlowGraph;
 use frame::Frame;
-use temp::Temp;
+use temp::{Label, Temp, TempMap};
 
-pub fn live_intervals<F: Frame>(graph: FlowGraph) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>, HashSet<usize>) {
+#[derive(Eq, PartialEq, PartialOrd, Ord)]
+pub struct StackLocation(pub i64);
+
+// TODO: create a struct for the return type.
+pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_live_analysis: bool) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>, HashSet<usize>, Vec<(Label, BTreeSet<StackLocation>)>) {
     let mut live_in: HashMap<usize, BTreeSet<Temp>> = HashMap::new();
     let mut live_out: HashMap<usize, BTreeSet<Temp>> = HashMap::new();
 
     let mut new_live_in = HashMap::new();
     let mut new_live_out = HashMap::new();
 
+    let mut stack_live_in: HashMap<usize, BTreeSet<i64>> = HashMap::new();
+    let mut stack_live_out: HashMap<usize, BTreeSet<i64>> = HashMap::new();
+
+    let mut new_stack_live_in = HashMap::new();
+    let mut new_stack_live_out = HashMap::new();
+
     loop {
-        for (index, node) in graph.nodes().iter().enumerate() {
+        for (index, node) in graph.nodes().iter().enumerate().rev() {
             new_live_in.insert(index, live_in.get(&index).cloned().unwrap_or_default());
             new_live_out.insert(index, live_out.get(&index).cloned().unwrap_or_default());
+
+            if do_stack_live_analysis {
+                new_stack_live_in.insert(index, stack_live_in.get(&index).cloned().unwrap_or_default());
+                new_stack_live_out.insert(index, stack_live_out.get(&index).cloned().unwrap_or_default());
+            }
+
+            let mut stack_set = BTreeSet::new();
+            let mut set = BTreeSet::new();
+            for &successor in node.successors() {
+                let in_set = live_in.entry(successor.index()).or_insert_with(|| BTreeSet::new());
+                set.extend(in_set.clone());
+
+                if do_stack_live_analysis {
+                    let in_set = stack_live_in.entry(successor.index()).or_insert_with(|| BTreeSet::new());
+                    stack_set.extend(in_set.clone());
+                }
+            }
+            live_out.insert(index, set);
+            if do_stack_live_analysis {
+                stack_live_out.insert(index, stack_set);
+            }
 
             let mut set = node.uses.clone();
             let out = live_out.entry(index).or_insert_with(|| BTreeSet::new());
             set.extend(out.difference(&node.defines));
             live_in.insert(index, set);
 
-            let mut set = BTreeSet::new();
-            for &successor in node.successors() {
-                let in_set = live_in.entry(successor.index()).or_insert_with(|| BTreeSet::new());
-                set.extend(in_set.clone());
+            if do_stack_live_analysis {
+                let mut set = node.stack_uses.clone();
+                let out = stack_live_out.entry(index).or_insert_with(|| BTreeSet::new());
+                set.extend(out.difference(&node.stack_defines));
+                stack_live_in.insert(index, set);
             }
-            live_out.insert(index, set);
         }
 
-        if new_live_in == live_in && new_live_out == live_out {
+        if new_live_in == live_in && new_live_out == live_out && new_stack_live_in == stack_live_in && new_stack_live_out == stack_live_out {
             break;
+        }
+    }
+
+    if do_stack_live_analysis {
+        // TODO: remove this extension of stack variable liveness. We probably want to identify derived pointers instead.
+        let nodes = graph.nodes();
+        let mut queue = vec![0];
+        let mut visited = HashSet::new();
+        visited.insert(0);
+        while let Some(index) = queue.pop() {
+            let node = &nodes[index];
+            if node.stack_defines.len() == 1 {
+                let define = *node.stack_defines.iter().next().expect("first stack define");
+                stack_live_out.entry(0).or_default()
+                    .insert(define);
+            }
+            for successor in node.successors() {
+                let live_out = stack_live_out.entry(index).or_default().clone();
+                let successor_live_out = stack_live_out.entry(successor.index()).or_default();
+                if !live_out.is_empty() {
+                    successor_live_out.extend(live_out.iter());
+                }
+                let index = successor.index();
+                if !visited.contains(&index) {
+                    visited.insert(index);
+                    queue.push(index);
+                }
+            }
         }
     }
 
@@ -82,7 +141,24 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph) -> (Vec<(Temp, Interval)>, Has
         }
     }
 
+    let mut temp_pointers = vec![];
+
     for (index, node) in nodes.iter().enumerate() {
+        if let Some(ref return_label) = node.return_label {
+            let empty_set = BTreeSet::new();
+            let stack_vars = stack_live_out.get(&index).unwrap_or(&empty_set);
+            let pointer_temps: BTreeSet<_> = stack_vars.iter().filter_map(|&stack_var| {
+                    if temp_map.contains_var(stack_var) {
+                        Some(StackLocation(stack_var))
+                    }
+                    else {
+                        None
+                    }
+            })
+                .collect();
+            temp_pointers.push((return_label.clone(), pointer_temps));
+        }
+
         for temp in &temps {
             if !live_in[&index].contains(temp) && !live_out[&index].contains(temp) {
                 if precolored.contains_key(temp) {
@@ -115,7 +191,7 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph) -> (Vec<(Temp, Interval)>, Has
     }
 
     let intervals = intervals.into_iter().collect();
-    (intervals, precolored_intervals, instructions_visited)
+    (intervals, precolored_intervals, instructions_visited, temp_pointers)
 }
 
 #[derive(Clone, Debug)]

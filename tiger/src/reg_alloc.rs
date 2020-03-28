@@ -107,7 +107,9 @@
 
 use std::collections::{
     BinaryHeap,
+    BTreeSet,
     HashMap,
+    HashSet,
 };
 use std::mem;
 
@@ -115,30 +117,45 @@ use asm::Instruction;
 use asm_gen::Gen;
 use flow::instructions_to_graph;
 use frame::Frame;
-use ir::{Exp, Statement};
-use liveness::{Interval, live_intervals};
-use temp::Temp;
+use ir::{Exp, _Statement};
+use liveness::{Interval, StackLocation, live_intervals};
+use temp::{Label, Temp, TempMap};
 
-pub fn alloc<F: Frame>(instructions: Vec<Instruction>, frame: &mut F) -> Vec<Instruction> {
-    let mut allocator = Allocator::new::<F>(instructions);
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct Pointer(i64);
+
+impl Pointer {
+    pub fn to_label<F: Frame>(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+pub fn alloc<F: Frame>(instructions: Vec<Instruction>, frame: &mut F, temp_map: TempMap) -> (Vec<Instruction>, Vec<(Label, Vec<Pointer>)>) {
+    let mut allocator = Allocator::new::<F>(instructions, temp_map);
     //allocator.spill_weight_calculation();
-    let (intervals, _) = allocator.live_interval_analysis::<F>();
+    let (intervals, _, temp_pointers) = allocator.live_interval_analysis::<F>();
     allocator.create_priority_queue(intervals);
     allocator.register_assignment();
     allocator.spill(frame);
-    allocator.replace_allocation()
+    allocator.replace_allocation();
+    let temp_pointers = allocator.replace_temp_map(temp_pointers);
+    (allocator.instructions, temp_pointers)
 }
 
 struct Allocator {
     instructions: Vec<Instruction>,
+    memory_location: HashMap<Temp, i64>,
     priority_queue: BinaryHeap<Interval>,
     registers: Vec<Register>,
     register_map: HashMap<Temp, Temp>,
     spill_temps: HashMap<Temp, Interval>,
+    spill_to_split: HashMap<Temp, HashSet<Temp>>,
+    split_to_spill: HashMap<Temp, Temp>,
+    temp_map: TempMap,
 }
 
 impl Allocator {
-    fn new<F: Frame>(instructions: Vec<Instruction>) -> Self {
+    fn new<F: Frame>(instructions: Vec<Instruction>, temp_map: TempMap) -> Self {
         let mut registers: Vec<_> = F::temp_map()
             .into_iter()
             .map(|(temp, _)| Register::new(temp, Interval::empty(temp)))
@@ -147,10 +164,14 @@ impl Allocator {
 
         Self {
             instructions,
+            memory_location: HashMap::new(),
             priority_queue: BinaryHeap::new(),
             registers,
             register_map: HashMap::new(),
             spill_temps: HashMap::new(),
+            spill_to_split: HashMap::new(),
+            split_to_spill: HashMap::new(),
+            temp_map,
         }
     }
 
@@ -170,10 +191,10 @@ impl Allocator {
         self.priority_queue.extend(live_intervals.into_iter().map(|(_, interval)| interval));
     }
 
-    fn live_interval_analysis<F: Frame>(&mut self) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>) {
+    fn live_interval_analysis<F: Frame>(&mut self) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>, Vec<(Label, BTreeSet<StackLocation>)>) {
         let flow_graph = instructions_to_graph(&self.instructions);
 
-        let (_, _, instructions_visited) = live_intervals::<F>(flow_graph);
+        let (_, _, instructions_visited, _) = live_intervals::<F>(flow_graph, &self.temp_map, false);
 
         let instructions = mem::replace(&mut self.instructions, vec![]);
         self.instructions = instructions.into_iter().enumerate()
@@ -181,16 +202,16 @@ impl Allocator {
             .map(|(_, instruction)| instruction)
             .collect();
         // TODO: find a better way to remove the unreachable code than doing the live interval
-        // analysis twice.
+        // analysis twice (because it's slow).
         let flow_graph = instructions_to_graph(&self.instructions);
-        let (intervals, precolored_intervals, _) = live_intervals::<F>(flow_graph);
+        let (intervals, precolored_intervals, _, temp_pointers) = live_intervals::<F>(flow_graph, &self.temp_map, true);
 
         for register in &mut self.registers {
             if let Some(interval) = &precolored_intervals.get(&register.temp) {
                 register.assign(interval);
             }
         }
-        (intervals, precolored_intervals)
+        (intervals, precolored_intervals, temp_pointers)
     }
 
     fn register_assignment(&mut self) {
@@ -203,7 +224,7 @@ impl Allocator {
         //allocator.split();
     }
 
-    fn replace_allocation(mut self) -> Vec<Instruction> {
+    fn replace_allocation(&mut self) {
         for instruction in &mut self.instructions {
             match instruction {
                 Instruction::Label { .. } => (),
@@ -232,8 +253,6 @@ impl Allocator {
                 _ => true,
             }
         });
-
-        self.instructions
     }
 
     fn spill<F: Frame>(&mut self, frame: &mut F) {
@@ -247,10 +266,9 @@ impl Allocator {
             memory.insert(temp, exp);
             intervals.insert(temp, spill);
         }
-        let mut gen = Gen::new();
+        let mut gen = Gen::<F>::new();
 
         let mut instructions = mem::replace(&mut self.instructions, vec![]);
-        let mut split_to_spill = HashMap::new();
 
         // Split the spilled temporaries.
         // This is important so that we do not assign both splits to the same register.
@@ -264,7 +282,10 @@ impl Allocator {
                             if self.spill_temps.contains_key(source) {
                                 let temp = Temp::new();
                                 source_temps.insert(*source, temp);
-                                split_to_spill.insert(temp, *source);
+                                self.spill_to_split.entry(*source)
+                                    .or_default()
+                                    .insert(temp);
+                                self.split_to_spill.insert(temp, *source);
                                 *source = temp;
                             }
                         }
@@ -275,7 +296,10 @@ impl Allocator {
                                         Some(temp) => *temp,
                                         None => Temp::new(),
                                     };
-                                split_to_spill.insert(temp, *destination);
+                                self.spill_to_split.entry(*destination)
+                                    .or_default()
+                                    .insert(temp);
+                                self.split_to_spill.insert(temp, *destination);
                                 *destination = temp;
                             }
                         }
@@ -290,11 +314,11 @@ impl Allocator {
                     Instruction::Operation { ref destination, ref source, .. } =>
                     {
                         for (source_index, source) in source.iter().enumerate() {
-                            if self.spill_temps.contains_key(split_to_spill.get(source).unwrap_or(source)) {
-                                let original_spill = split_to_spill[source];
+                            if self.spill_temps.contains_key(self.split_to_spill.get(source).unwrap_or(source)) {
+                                let original_spill = self.split_to_spill[source];
                                 // Reload before use.
                                 let temp = gen.munch_expression(memory[&original_spill].clone());
-                                gen.munch_statement(Statement::Move(Exp::Temp(*source), Exp::Temp(temp)));
+                                gen.munch_statement(_Statement::Move(Exp::Temp(*source), Exp::Temp(temp)).into());
                                 let mut interval = intervals[&original_spill].clone();
                                 interval.split_for_reload(index, source_index + 1);
                                 interval.temp = temp;
@@ -307,10 +331,19 @@ impl Allocator {
                         let destination = destination.clone(); // TODO: remove this clone?
                         gen.emit(instruction);
                         for (destination_index, destination) in destination.iter().enumerate() {
-                            if self.spill_temps.contains_key(split_to_spill.get(destination).unwrap_or(destination)) {
-                                let original_spill = split_to_spill[&destination];
+                            if self.spill_temps.contains_key(self.split_to_spill.get(destination).unwrap_or(destination)) {
+                                let original_spill = self.split_to_spill[&destination];
                                 // Spill after def.
-                                gen.munch_statement(Statement::Move(memory[&original_spill].clone(), Exp::Temp(*destination)));
+                                let mut offset = None;
+                                if let Exp::Mem(ref mem) = memory[&original_spill] {
+                                    if let Exp::BinOp { ref right, .. } = **mem {
+                                        if let Exp::Const(num) = **right {
+                                            offset = Some(num);
+                                        }
+                                    }
+                                }
+                                debug_assert!(self.memory_location.insert(*destination, offset.expect("offset")).is_none());
+                                gen.munch_statement(_Statement::Move(memory[&original_spill].clone(), Exp::Temp(*destination)).into());
                                 let mut interval = intervals[&original_spill].clone();
                                 interval.split_for_spill(index, destination_index);
                                 interval.temp = *destination;
@@ -324,6 +357,7 @@ impl Allocator {
 
         self.instructions = gen.get_result();
 
+
         self.spill_temps.clear();
 
         // Assign register with the new intervals.
@@ -333,6 +367,21 @@ impl Allocator {
         //debug_assert!(self.spill_temps.is_empty()); // FIXME: for some reasons, it fails when
         //having fewer registers available, even though the merge.tig example still executes
         //correctly.
+    }
+
+    fn replace_temp_map(&self, temp_map: Vec<(Label, BTreeSet<StackLocation>)>) -> Vec<(Label, Vec<Pointer>)> {
+        let mut pointer_temps = vec![];
+        for (label, locations) in temp_map {
+            let new_temps = locations.iter().map(|location| {
+                match *location {
+                    StackLocation(stack) => {
+                        vec![Pointer(stack)]
+                    },
+                }
+            }).flatten().collect();
+            pointer_temps.push((label, new_temps));
+        }
+        pointer_temps
     }
 }
 
@@ -475,7 +524,7 @@ mod tests {
 
             for fragment in fragments {
                 match fragment {
-                    Fragment::Function { body, frame } => {
+                    Fragment::Function { body, escaping_vars, frame, temp_map } => {
                         let mut frame = frame.borrow_mut();
                         let body = frame.proc_entry_exit1(body);
 
@@ -483,15 +532,15 @@ mod tests {
                         let (basic_blocks, done_label) = basic_blocks(statements);
                         let statements = trace_schedule(basic_blocks, done_label);
 
-                        let mut generator = Gen::new();
+                        let mut generator = Gen::<X86_64>::new();
                         for statement in statements {
                             generator.munch_statement(statement);
                         }
                         let instructions = generator.get_result();
-                        let instructions = frame.proc_entry_exit2(instructions);
+                        let instructions = frame.proc_entry_exit2(instructions, escaping_vars);
 
-                        let mut allocator = Allocator::new::<X86_64>(instructions);
-                        let (intervals, precolored_intervals) = allocator.live_interval_analysis::<X86_64>();
+                        let mut allocator = Allocator::new::<X86_64>(instructions, temp_map);
+                        let (intervals, precolored_intervals, _) = allocator.live_interval_analysis::<X86_64>();
 
                         return (intervals, precolored_intervals);
                     },
@@ -515,21 +564,21 @@ mod tests {
         let mut expected_precolored_intervals = HashMap::new();
 
         let mut intervals = HashMap::new();
-        intervals.insert(29, vec![(11, 11), (22, usize::max_value())]);
-        intervals.insert(30, vec![(8, 9), (22, usize::max_value())]);
-        intervals.insert(31, vec![(12, 13), (22, usize::max_value())]);
+        intervals.insert(29, vec![(12, 12), (23, usize::max_value())]);
+        intervals.insert(30, vec![(8, 9), (23, usize::max_value())]);
+        intervals.insert(31, vec![(13, 14), (23, usize::max_value())]);
         expected_intervals.insert("tests/hello.tig", intervals);
         let mut intervals = HashMap::new();
         intervals.insert(2, vec![(0, usize::max_value())]);
         expected_precolored_intervals.insert("tests/hello.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(66, vec![(20, 21), (78, usize::max_value())]);
-        intervals.insert(65, vec![(21, 23), (78, usize::max_value())]);
+        intervals.insert(66, vec![(20, 21), (83, usize::max_value())]);
+        intervals.insert(65, vec![(21, 23), (83, usize::max_value())]);
         expected_intervals.insert("tests/integers.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(106, vec![(15, 16), (19, 22), (132, usize::max_value())]);
+        intervals.insert(106, vec![(19, 20), (23, 26), (203, usize::max_value())]);
         expected_intervals.insert("tests/conditions.tig", intervals);
         let mut intervals = HashMap::new();
         intervals.insert(2, vec![(0, usize::max_value())]);

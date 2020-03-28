@@ -22,24 +22,32 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::rc::Rc;
 
 use asm::{Instruction, Subroutine};
 use ir::{Exp, Statement};
-use temp::{Label, Temp};
+use temp::{Label, Temp, TempMap};
 
 pub mod x86_64;
 
 pub enum Fragment<F: Frame> {
     Function {
         body: Statement,
+        escaping_vars: Vec<i64>,
         frame: Rc<RefCell<F>>,
+        temp_map: TempMap,
     },
     Str(Label, String),
 }
 
+pub trait Memory {
+    fn as_stack(&self) -> Option<i64>;
+    fn as_temp(&self) -> Option<&Temp>;
+}
+
 pub trait Frame: Clone {
-    type Access: Clone + Debug;
+    type Access: Clone + Debug + Eq + Hash + Memory;
 
     const WORD_SIZE: i64;
 
@@ -61,9 +69,9 @@ pub trait Frame: Clone {
 
     fn exp(&self, access: Self::Access, stack_frame: Exp) -> Exp;
 
-    fn external_call(name: &str, arguments: Vec<Exp>) -> Exp;
+    fn external_call(name: &str, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp;
 
     fn proc_entry_exit1(&mut self, statement: Statement) -> Statement;
-    fn proc_entry_exit2(&self, instructions: Vec<Instruction>) -> Vec<Instruction>;
+    fn proc_entry_exit2(&self, instructions: Vec<Instruction>, escaping_vars: Vec<i64>) -> Vec<Instruction>;
     fn proc_entry_exit3(&self, body: Vec<Instruction>) -> Subroutine;
 }
