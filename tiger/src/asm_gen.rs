@@ -742,9 +742,17 @@ impl<F: Frame> Gen<F> {
                     assembly: "call 's0".to_string(),
                     source,
                     destination: X86_64::calldefs(),
-                    return_label,
+                    return_label: return_label.clone(),
                 };
                 self.emit(instruction);
+
+                let instruction =
+                    Instruction::Label {
+                        assembly: format!("{}:", return_label.clone()),
+                        label: return_label, // TODO: check if this is okay.
+                    };
+                self.emit(instruction);
+
                 let instruction = Instruction::Move {
                     assembly: "mov 'd0, 's0".to_string(),
                     source: vec![X86_64::rax()],

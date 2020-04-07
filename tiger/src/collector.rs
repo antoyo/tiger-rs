@@ -29,6 +29,7 @@ use std::ptr;
 
 use data_layout::{
     ARRAY_DATA_LAYOUT_SIZE,
+    CLASS_DATA_LAYOUT_SIZE,
     RECORD_DATA_LAYOUT_SIZE,
     STRING_DATA_LAYOUT_SIZE,
     STRING_TYPE,
@@ -40,12 +41,14 @@ const SHOW_STATS: bool = false;
 #[derive(Debug)]
 pub enum Layout {
     Array(usize, bool),
+    Class(*const c_char),
     Record(*const c_char),
     String(usize),
 }
 
 const ARRAY_TYPE: usize = 0;
 const RECORD_TYPE: usize = 1;
+const CLASS_TYPE: usize = 3;
 
 impl Layout {
     fn write_repr(&self, mut ptr: *mut usize) {
@@ -57,6 +60,11 @@ impl Layout {
                     ptr::write(ptr, length * WORD_SIZE);
                     ptr = ptr.offset(1);
                     ptr::write(ptr, is_pointer as usize);
+                },
+                Layout::Class(data_layout) => {
+                    ptr::write(ptr, CLASS_TYPE);
+                    ptr = ptr.offset(1);
+                    ptr::write(ptr, data_layout as usize)
                 },
                 Layout::Record(data_layout) => {
                     ptr::write(ptr, RECORD_TYPE);
@@ -75,6 +83,12 @@ impl Layout {
     fn size(&self) -> usize {
         match *self {
             Layout::Array(length, _) => (length + ARRAY_DATA_LAYOUT_SIZE) * WORD_SIZE,
+            Layout::Class(data_layout) => {
+                let string_ptr = string_offset(data_layout);
+                let fields = unsafe { CStr::from_ptr(string_ptr) };
+                let field_count = fields.to_bytes().len() + CLASS_DATA_LAYOUT_SIZE;
+                field_count * WORD_SIZE
+            },
             Layout::Record(data_layout) => {
                 let string_ptr = string_offset(data_layout);
                 let fields = unsafe { CStr::from_ptr(string_ptr) };
@@ -159,6 +173,7 @@ impl Collector {
         self.allocated += size;
         unsafe {
             let ptr = self.heap.as_ptr().offset(offset as isize) as *mut usize;
+
             data_layout.write_repr(ptr);
             ptr as i64
         }
@@ -218,6 +233,14 @@ impl Collector {
                         }
                     }
                 },
+                CLASS_TYPE => {
+                    for (i, &field_layout) in record_layout(pointer).iter().enumerate() {
+                        if field_layout == b'p' {
+                            let field = class_field(pointer, i);
+                            self.dfs(field);
+                        }
+                    }
+                },
                 RECORD_TYPE => {
                     for (i, &field_layout) in record_layout(pointer).iter().enumerate() {
                         if field_layout == b'p' {
@@ -254,6 +277,17 @@ impl Collector {
                                 self.dfs_locations(pointer_value, locations);
                             }
                             ptr = ptr.offset(1);
+                        }
+                    }
+                }
+            },
+            CLASS_TYPE => {
+                for (i, &field_layout) in record_layout(pointer).iter().enumerate() {
+                    if field_layout == b'p' {
+                        let field = class_field(pointer, i);
+                        if self.in_heap(field) {
+                            locations.insert(class_field_address(pointer, i) as usize, field);
+                            self.dfs_locations(field, locations);
                         }
                     }
                 }
@@ -343,19 +377,21 @@ impl Collector {
         self.heap.resize(self.heap.len() * 2, 0);
 
         let start = self.heap.as_ptr() as usize;
-        for (&location, &pointer) in &locations {
-            let offset = pointer - old_heap;
-            unsafe {
-                let location =
-                    // NOTE: a location could come from the previous heap, hence this adjustment.
-                    if location >= old_heap && location < old_heap + self.heap_length {
-                        let offset = location - old_heap;
-                        start + offset
-                    }
-                    else {
-                        location
-                    };
-                ptr::write(location as *mut usize, start + offset);
+        if start != old_heap {
+            for (&location, &pointer) in &locations {
+                let offset = pointer - old_heap;
+                unsafe {
+                    let location =
+                        // NOTE: a location could come from the previous heap, hence this adjustment.
+                        if location >= old_heap && location < old_heap + self.heap_length {
+                            let offset = location - old_heap;
+                            start + offset
+                        }
+                        else {
+                            location
+                        };
+                    ptr::write(location as *mut usize, start + offset);
+                }
             }
         }
 
@@ -402,6 +438,19 @@ fn fetch_pointer_map() -> HashMap<usize, Vec<Stack>> {
     pointer_map
 }
 
+fn class_field(ptr: usize, index: usize) -> usize {
+    unsafe {
+        *class_field_address(ptr, index)
+    }
+}
+
+fn class_field_address(ptr: usize, index: usize) -> *const usize {
+    let ptr = ptr as *const usize;
+    unsafe {
+        ptr.offset((index + CLASS_DATA_LAYOUT_SIZE) as isize)
+    }
+}
+
 fn field(ptr: usize, index: usize) -> usize {
     unsafe {
         *field_address(ptr, index)
@@ -435,6 +484,9 @@ fn size_of(ptr: usize) -> usize {
             ARRAY_TYPE => {
                 let ptr = ptr.offset(1);
                 *ptr + ARRAY_DATA_LAYOUT_SIZE * WORD_SIZE
+            },
+            CLASS_TYPE => {
+                (field_count(ptr as usize) + CLASS_DATA_LAYOUT_SIZE) * WORD_SIZE
             },
             RECORD_TYPE => {
                 (field_count(ptr as usize) + RECORD_DATA_LAYOUT_SIZE) * WORD_SIZE

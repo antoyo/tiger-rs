@@ -24,11 +24,12 @@ use std::fmt::{self, Display, Formatter};
 use position::Pos;
 use self::Tok::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Tok {
     Ampersand,
     Array,
     Break,
+    Class,
     CloseCurly,
     CloseParen,
     CloseSquare,
@@ -39,7 +40,9 @@ pub enum Tok {
     Dot,
     Else,
     End,
+    EndOfFile,
     Equal,
+    Extends,
     For,
     Function,
     Greater,
@@ -51,7 +54,9 @@ pub enum Tok {
     Lesser,
     LesserOrEqual,
     Let,
+    Method,
     Minus,
+    New,
     Nil,
     NotEqual,
     Of,
@@ -84,6 +89,7 @@ impl Display for Tok {
                 Ampersand => "&",
                 Array => "array",
                 Break => "break",
+                Class => "class",
                 CloseCurly => "}",
                 CloseParen => ")",
                 CloseSquare => "]",
@@ -93,7 +99,9 @@ impl Display for Tok {
                 Do => "do",
                 Dot => ".",
                 Else => "else",
+                EndOfFile => "<eof>",
                 Equal => "=",
+                Extends => "extends",
                 End => "end",
                 For => "for",
                 Function => "function",
@@ -106,7 +114,9 @@ impl Display for Tok {
                 Lesser => "<",
                 LesserOrEqual => "<=",
                 Let => "let",
+                Method => "method",
                 Minus => "-",
+                New => "new",
                 Nil => "nil",
                 NotEqual => "<>",
                 Of => "of",

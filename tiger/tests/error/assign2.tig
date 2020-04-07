@@ -1,0 +1,4 @@
+let function test(): int = 0
+in
+    test() := 2
+end

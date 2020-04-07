@@ -32,6 +32,7 @@ use temp::{Label, Temp, TempMap};
 pub mod x86_64;
 
 pub enum Fragment<F: Frame> {
+    // TODO: use a fragment for the pointer map?
     Function {
         body: Statement,
         escaping_vars: Vec<i64>,
@@ -39,6 +40,10 @@ pub enum Fragment<F: Frame> {
         temp_map: TempMap,
     },
     Str(Label, String),
+    VTable {
+        class: Label,
+        methods: Vec<Label>,
+    },
 }
 
 pub trait Memory {

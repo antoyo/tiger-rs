@@ -111,7 +111,7 @@ impl<R: Read> Lexer<R> {
     }
 
     fn current_pos(&self) -> Pos {
-        self.pos.clone()
+        self.pos
     }
 
     fn eat(&mut self, ch: char) -> Result<()> {
@@ -171,14 +171,18 @@ impl<R: Read> Lexer<R> {
             match ident.as_str() {
                 "array" => Array,
                 "break" => Break,
+                "class" => Class,
                 "do" => Do,
                 "else" => Else,
                 "end" => End,
+                "extends" => Extends,
                 "for" => For,
                 "function" => Function,
                 "if" => If,
                 "in" => In,
                 "let" => Let,
+                "method" => Method,
+                "new" => New,
                 "nil" => Nil,
                 "of" => Of,
                 "then" => Then,
@@ -206,7 +210,7 @@ impl<R: Read> Lexer<R> {
         if length > 10000 {
             panic!();
         }
-        let mut pos = self.saved_pos.clone();
+        let mut pos = self.saved_pos;
         pos.length = length;
         Ok(Token {
             pos,
@@ -219,7 +223,7 @@ impl<R: Read> Lexer<R> {
     }
 
     fn simple_token(&mut self, token: Tok) -> Result<Token> {
-        let mut pos = self.pos.clone();
+        let mut pos = self.pos;
         pos.length = 1;
         self.advance()?;
         Ok(Token {
@@ -254,7 +258,7 @@ impl<R: Read> Lexer<R> {
         if self.current_char()? == '*' {
             match self.comment() {
                 Err(Eof) => {
-                    let mut pos = self.saved_pos.clone();
+                    let mut pos = self.saved_pos;
                     pos.length = 2;
                     return Err(Unclosed {
                         pos,
@@ -302,7 +306,7 @@ impl<R: Read> Lexer<R> {
         })();
         match result {
             Err(Eof) => {
-                let mut pos = self.saved_pos.clone();
+                let mut pos = self.saved_pos;
                 pos.length = 1;
                 Err(Unclosed {
                     pos,
@@ -327,7 +331,7 @@ impl<R: Read> Lexer<R> {
         Ok(buffer)
     }
 
-    #[allow(cyclomatic_complexity)]
+    #[allow(clippy::cyclomatic_complexity)]
     pub fn token(&mut self) -> Result<Token> {
         if let Some(&Ok(ch)) = self.bytes_iter.peek() {
             return match ch {
@@ -370,7 +374,14 @@ impl<R: Read> Lexer<R> {
         match self.bytes_iter.next() {
             Some(Ok(_)) => unreachable!(),
             Some(Err(error)) => Err(error.into()),
-            None => Err(Eof),
+            None => {
+                let mut pos = self.pos;
+                pos.length = 1;
+                Ok(Token {
+                    pos,
+                    token: EndOfFile,
+                })
+            },
         }
     }
 

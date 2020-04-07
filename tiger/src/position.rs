@@ -19,7 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Debug, Formatter};
 use std::u32;
 
 use symbol::{Symbol, Symbols};
@@ -32,9 +32,6 @@ pub struct Pos {
     pub file: Symbol,
     pub length: usize,
     pub line: u32,
-}
-
-impl Pos {
 }
 
 impl Pos {

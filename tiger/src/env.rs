@@ -32,6 +32,9 @@ use types::Type;
 
 #[derive(Clone, Debug)]
 pub enum Entry<F: Clone + Frame> {
+    ClassField {
+        class: Type,
+    },
     Fun {
         external: bool,
         label: Label,
@@ -149,6 +152,7 @@ pub fn external_functions() -> BTreeMap<&'static str, (Vec<Type>, Type)> {
     functions.insert("exit", (vec![Type::Int], Type::Unit));
     functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int));
 
+    functions.insert("allocClass", (vec![Type::Int], Type::Int));
     functions.insert("allocRecord", (vec![Type::Int], Type::Int));
     functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int));
     functions

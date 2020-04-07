@@ -1,0 +1,69 @@
+let var start := 10
+
+    class Vehicle extends Object {
+        var position := start
+        method move(x: int) = (
+            self.position := self.position + x;
+            let var position := 100
+            in
+                position := position + 200
+            end;
+            position := position + x
+        )
+    }
+
+    class Car extends Vehicle {
+        var passengers := 40
+
+        method await(v: Vehicle) =
+            if v.position < position then (
+                v.move(position - v.position)
+            )
+            else
+                self.move(10)
+    }
+
+    class Truck extends Vehicle {
+        method move(x: int) =
+            if x <= 55 then
+                position := position + x
+    }
+
+    var t := new Truck
+    var c := new Car
+    var v : Vehicle := c
+    var vehicle := new Vehicle
+    var truck : Vehicle := t
+in
+    printi(vehicle.position);
+    vehicle.move(10);
+    printi(vehicle.position);
+    print("Passengers: ");
+    printi(c.passengers);
+    c.passengers := 2;
+    printi(c.position);
+    printi(c.passengers);
+
+    print("await\n");
+    printi(c.position);
+    printi(t.position);
+
+    c.move(10);
+    c.await(t);
+    printi(c.position);
+    printi(v.position);
+    print("Truck: ");
+    printi(t.position);
+
+    c.move(60);
+    v.move(70);
+    printi(c.position);
+    printi(v.position);
+    printi(t.position);
+
+    truck.move(100);
+    printi(truck.position);
+
+    truck.move(55);
+    printi(truck.position)
+end

@@ -28,8 +28,6 @@ use ast::{
     ExprWithPos,
     FuncDeclaration,
     Operator,
-    Var,
-    VarWithPos,
 };
 use position::WithPos;
 use symbol::{Strings, Symbols};
@@ -59,6 +57,11 @@ impl EscapeFinder {
 
     fn visit_dec(&mut self, declaration: &DeclarationWithPos, depth: u32) {
         match declaration.node {
+            Declaration::ClassDeclaration { ref declarations, .. } => {
+                for declaration in declarations {
+                    self.visit_dec(declaration, depth + 1);
+                }
+            },
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref params, ref body, .. }, .. } in declarations {
                     for param in params {
@@ -88,7 +91,7 @@ impl EscapeFinder {
                 self.visit_exp(init, depth);
             },
             Expr::Assign { ref expr, ref var } => {
-                self.visit_var(var, depth);
+                self.visit_exp(var, depth);
                 self.visit_exp(expr, depth);
             },
             Expr::Break => {
@@ -96,6 +99,14 @@ impl EscapeFinder {
             Expr::Call { ref args, .. } => {
                 for arg in args {
                     self.visit_exp(arg, depth);
+                }
+            },
+            Expr::Field { ref ident, .. } |
+                Expr::Variable(ref ident) => {
+                if let Some(ref mut var) = self.env.look_mut(ident.node) {
+                    if depth > var.depth {
+                        var.escape = true;
+                    }
                 }
             },
             Expr::If { ref else_, ref test, ref then } => {
@@ -112,6 +123,12 @@ impl EscapeFinder {
                 }
                 self.visit_exp(body, depth);
             },
+            Expr::MethodCall { ref args, .. } => {
+                for arg in args {
+                    self.visit_exp(arg, depth);
+                }
+            },
+            Expr::New { .. } => (),
             Expr::Nil => (),
             Expr::Oper { ref left, oper: WithPos { node: Operator::Plus, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Minus, .. }, ref right }
@@ -143,27 +160,13 @@ impl EscapeFinder {
                 }
             },
             Expr::Str { .. } => (),
-            Expr::Variable(ref var) => self.visit_var(var, depth),
+            Expr::Subscript { ref expr, ref this } => {
+                self.visit_exp(this, depth);
+                self.visit_exp(expr, depth);
+            },
             Expr::While { ref body, ref test } => {
                 self.visit_exp(test, depth);
                 self.visit_exp(body, depth);
-            },
-        }
-    }
-
-    fn visit_var(&mut self, var: &VarWithPos, depth: u32) {
-        match var.node {
-            Var::Field { ref ident, .. } |
-                Var::Simple { ref ident } => {
-                if let Some(ref mut var) = self.env.look_mut(ident.node) {
-                    if depth > var.depth {
-                        var.escape = true;
-                    }
-                }
-            },
-            Var::Subscript { ref expr, ref this } => {
-                self.visit_var(this, depth);
-                self.visit_exp(expr, depth);
             },
         }
     }

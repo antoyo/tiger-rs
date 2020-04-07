@@ -1,0 +1,12 @@
+let type intArray = array of int
+    type arrayOfArray = array of intArray
+    var myArrayOfArray := arrayOfArray [11] of intArray [14] of 43
+    var myNum := 9
+    var indexing := myArrayOfArray[myNum][0]
+
+    /*var myArrayOfArray := intArray [14] of 43
+    var myNum := 9
+    var indexing := myArrayOfArray[myNum]*/
+in
+    printi(indexing)
+end

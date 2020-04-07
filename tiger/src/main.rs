@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2020 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -106,6 +106,8 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let file_symbol = symbols.symbol(&filename);
         let lexer = Lexer::new(file, file_symbol);
         let main_symbol = symbols.symbol("main");
+        let self_symbol = symbols.symbol("self");
+        let object_symbol = symbols.symbol("Object");
         let mut parser = Parser::new(lexer, symbols);
         let ast = parser.parse()?;
         let mut rewriter = Rewriter::new(symbols);
@@ -113,7 +115,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let escape_env = find_escapes(&ast, Rc::clone(&strings));
         let mut env = Env::<X86_64>::new(&strings, escape_env);
         {
-            let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings));
+            let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings), self_symbol, object_symbol);
             let fragments = semantic_analyzer.analyze(main_symbol, ast)?;
 
             let mut asm_output_path = PathBuf::from(&filename);
@@ -144,6 +146,16 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                             writeln!(file, "dq 0")?;
                         }
                         writeln!(file, "db {}, 0", to_nasm(string))?;
+                    },
+                    Fragment::VTable { class, methods } => {
+                        writeln!(file, "{}:", class)?;
+                        if !methods.is_empty() {
+                            let labels = methods.iter()
+                                .map(|label| label.to_string())
+                                .collect::<Vec<_>>()
+                                .join("\n    dq ");
+                            writeln!(file, "    dq {}", labels)?;
+                        }
                     },
                 }
             }
@@ -183,6 +195,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         writeln!(file, "    {}", subroutine.epilog)?;
                     },
                     Fragment::Str(_, _) => (),
+                    Fragment::VTable { .. } => (),
                 }
             }
 

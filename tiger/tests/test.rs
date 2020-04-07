@@ -29,6 +29,7 @@ fn test_execution() {
     let files = [
         "array",
         "array_assignment",
+        "class",
         "comments",
         "conditions",
         "cycle",

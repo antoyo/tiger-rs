@@ -29,12 +29,15 @@ use self::Error::*;
 use symbol::Symbols;
 use terminal::Terminal;
 use token::Tok;
-use types::Type;
+use types::{FunctionType, Type};
 
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Debug)]
 pub enum Error {
+    Assign {
+        pos: Pos,
+    },
     BreakOutsideLoop {
         pos: Pos,
     },
@@ -55,8 +58,18 @@ pub enum Error {
         pos: Pos,
         struct_name: String,
     },
+    FunctionType {
+        expected: FunctionType,
+        pos: Pos,
+        unexpected: FunctionType,
+    },
     InvalidEscape {
         escape: String,
+        pos: Pos,
+    },
+    InvalidNumberOfParams {
+        actual: usize,
+        expected: usize,
         pos: Pos,
     },
     MissingField {
@@ -66,7 +79,11 @@ pub enum Error {
     },
     Msg(String),
     Multi(Vec<Error>),
-    NotARecord {
+    NotAClass {
+        pos: Pos,
+        typ: Type,
+    },
+    NotARecordOrClass {
         pos: Pos,
         typ: Type,
     },
@@ -117,6 +134,11 @@ impl Error {
         }
         eprint!("{}{}error: {}", terminal.bold(), terminal.red(), terminal.reset_color());
         match *self {
+            Assign { pos } => {
+                eprintln!("Can only assign to variable, field or array element{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
             BreakOutsideLoop { pos } => {
                 eprintln!("Break statement used outside of loop{}", terminal.end_bold());
                 pos.show(symbols, terminal);
@@ -139,8 +161,18 @@ impl Error {
                 eprintln!("Extra field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
                 pos.show(symbols, terminal);
             },
+            Error::FunctionType { ref expected, pos, ref unexpected } => {
+                eprintln!("Overridden method should have the same type as the inherited method:\nunexpected {}\n expecting {}{}", unexpected.show(symbols), expected.show(symbols), terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
             InvalidEscape { ref escape, pos } => {
                 eprintln!("Invalid escape \\{}{}", escape, terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            InvalidNumberOfParams { actual, expected, pos } => {
+                eprintln!("Invalid number of parameters: expecting {}, but found {}{}", expected, actual, terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },
@@ -150,7 +182,12 @@ impl Error {
             },
             Msg(ref string) => eprintln!("{}", string),
             Multi(_) => unreachable!(),
-            NotARecord { pos, ref typ } => {
+            NotAClass { pos, ref typ } => {
+                eprintln!("Type `{}` is not a class type{}", typ.show(symbols), terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            NotARecordOrClass { pos, ref typ } => {
                 eprintln!("Type `{}` is not a struct or a class type{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
@@ -199,6 +236,18 @@ impl Error {
     }
 }
 
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Msg(error.to_string())
+    }
+}
+
+impl<'a> From<&'a Error> for Error {
+    fn from(error: &'a Error) -> Self {
+        error.clone()
+    }
+}
+
 fn highlight_line(pos: Pos, symbols: &Symbols<()>, terminal: &Terminal) -> io::Result<()> {
     let filename = symbols.name(pos.file);
     let mut file = File::open(filename)?;
@@ -233,16 +282,4 @@ pub fn num_text_size(num: i64) -> usize {
         return 1;
     }
     1 + (num as f64).log10().floor() as usize
-}
-
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Msg(error.to_string())
-    }
-}
-
-impl<'a> From<&'a Error> for Error {
-    fn from(error: &'a Error) -> Self {
-        error.clone()
-    }
 }

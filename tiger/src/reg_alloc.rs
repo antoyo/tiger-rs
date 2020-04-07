@@ -514,12 +514,14 @@ mod tests {
         let file_symbol = symbols.symbol("no_file");
         let lexer = Lexer::new(file, file_symbol);
         let main_symbol = symbols.symbol("main");
+        let self_symbol = symbols.symbol("self");
+        let object_symbol = symbols.symbol("Object");
         let mut parser = Parser::new(lexer, &mut symbols);
         let ast = parser.parse().expect("parse");
         let escape_env = find_escapes(&ast, Rc::clone(&strings));
         let mut env = Env::<X86_64>::new(&strings, escape_env);
         {
-            let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings));
+            let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings), self_symbol, object_symbol);
             let fragments = semantic_analyzer.analyze(main_symbol, ast).expect("semantic analyze");
 
             for fragment in fragments {
@@ -545,6 +547,7 @@ mod tests {
                         return (intervals, precolored_intervals);
                     },
                     Fragment::Str(_, _) => (),
+                    Fragment::VTable { .. } => (),
                 }
             }
         }

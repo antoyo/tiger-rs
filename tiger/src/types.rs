@@ -19,12 +19,54 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+use ast::ExprWithPos;
 use ir::Exp;
 use self::Type::*;
 use symbol::{Symbol, Symbols, SymbolWithPos};
+use temp::Label;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassField {
+    pub name: Symbol,
+    pub typ: Type,
+    pub value: ExprWithPos,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FunctionType {
+    pub param_types: Vec<Type>,
+    pub return_type: Type,
+}
+
+impl FunctionType {
+    pub fn show(&self, symbols: &Symbols<()>) -> std::string::String {
+        let param_types = self.param_types.iter()
+            .map(|typ| typ.show(symbols))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("({}) -> {}", param_types, self.return_type.show(symbols))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassMethod {
+    pub class_name: Symbol,
+    pub label: Label,
+    pub name: SymbolWithPos,
+    pub typ: FunctionType,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
+    Class {
+        data_layout: std::string::String,
+        fields: Vec<ClassField>,
+        methods: Vec<ClassMethod>,
+        name: Symbol,
+        parent_class: Option<SymbolWithPos>,
+        unique: Unique,
+        vtable_name: Label,
+    },
     Int,
     String,
     Record {
@@ -41,11 +83,27 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn is_pointer(&self) -> bool {
+        match *self {
+            Array { .. } | Class { .. } | Record { .. } | String  => true,
+            Name(_, ref typ) => {
+                if let Some(typ) = typ.as_ref() {
+                    typ.is_pointer()
+                }
+                else {
+                    false
+                }
+            },
+            _ => false,
+        }
+    }
+
     pub fn show(&self, symbols: &Symbols<()>) -> std::string::String {
         match *self {
             Array(ref typ, _) => {
                 format!("[{}]", typ.show(symbols))
             },
+            Class { name, .. } => format!("class {}", symbols.name(name)),
             Int => "int".to_string(),
             Name(_, ref typ) => {
                 if let Some(typ) = typ {
@@ -60,21 +118,6 @@ impl Type {
             String => "string".to_string(),
             Unit => "()".to_string(),
             Error => "type error".to_string(),
-        }
-    }
-
-    pub fn is_pointer(&self) -> bool {
-        match *self {
-            Array { .. } | Record { .. } | String  => true,
-            Name(_, ref typ) => {
-                if let Some(typ) = typ.as_ref() {
-                    typ.is_pointer()
-                }
-                else {
-                    false
-                }
-            },
-            _ => false,
         }
     }
 }

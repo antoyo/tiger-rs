@@ -1,0 +1,46 @@
+let var start := 10
+
+    class Vehicle extends Object {
+        var position := start
+        method move(x: int) = (
+            print("move\n");
+            self.position := self.position + x;
+            let var position := 100
+            in
+                position := position + 200
+            end;
+            position := position + x
+        )
+    }
+
+    class Car extends Bike {
+        var passengers := 40
+
+        method await(v: Vehicle) =
+            printi(passengers)
+    }
+
+    class Truck extends Vehicle {
+        method value() =
+            12
+
+        var passengers := self.value()
+
+        method move(v: Vehicle) =
+            printi(0)
+    }
+
+    type Array = {
+        field: int
+    }
+
+    class Vec extends Array {
+        method p() =
+            print("p")
+    }
+
+    var b := new Bike
+    var t: Truck := new Vehicle
+in
+    printi(b.position)
+end

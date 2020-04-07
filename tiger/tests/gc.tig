@@ -3,6 +3,72 @@ let type Point = {
         y: int
     }
     type strings = array of string
+
+    class Pos extends Object {
+        var x := 0
+        var y := 0
+
+        method set(x: int, y: int) = (
+            self.x := x;
+            self.y := y
+        )
+    }
+
+    class Vector extends Object {
+        var x := 0
+        var y := 0
+        var z := 0
+        var names := strings[42] of "array_of_vector"
+
+        method set(new_x: int, new_y: int, new_z: int) = (
+            self.x := new_x;
+            self.y := new_y;
+            self.z := new_z
+        )
+    }
+
+    var pos := new Pos
+    var set := (
+        pos.x := 142;
+        pos.y := 124
+    )
+    var corigin := new Pos
+
+    function fc() : Pos =
+        let var pos := new Pos
+        in
+            pos.x := 100;
+            pos.y := 102;
+            pos
+        end
+
+    function gc() : Pos =
+        let var p := fc()
+        in
+            p.x := 104;
+            p
+        end
+    function hc() : Pos =
+        let var p := gc()
+        in
+            p.y := 112;
+            p
+        end
+    var pos10 := hc()
+    type vectorArray = array of Vector
+    var vector := new Vector
+    var set := vector.set(101, 102, 103)
+    var array_of_vector := vectorArray[13] of vector
+    class clist extends Object {
+        var first := 0
+        var rest : clist := nil
+
+        method set(value: int) =
+            first := value
+    }
+    var clist := new clist
+    var set := clist.set(42)
+
     type Vec3D = {
         x: int,
         y: int,
@@ -85,6 +151,42 @@ in (
             print(b[11].names[20]);
             print("\n")
         end;
+
+    for i := 0 to 50 do
+        let var origin := new Pos
+            var p2 := new Pos
+            var p3 := new Pos
+            var p4 := new Pos
+            type intArray = array of int
+            var a := intArray[12] of 114
+            var vector := new Vector
+            var b := vectorArray[12] of vector
+            var list := new clist
+        in
+            origin.set(120, 121);
+            p2.set(122, 123);
+            p3.set(124, 125);
+            p4.set(126, 127);
+            vector.set(101, 102, 103);
+            list.first := 43;
+
+            let var new_list := new clist
+            in
+                new_list.first := 125;
+                new_list.rest := list;
+                list := new_list
+            end;
+            printi(i);
+            printi(origin.x);
+            printi(p2.x);
+            printi(p3.x);
+            printi(p4.x);
+            printi(a[3]);
+            printi(b[3].z);
+            printi(list.first);
+            print(b[11].names[20]);
+            print("\n")
+        end;
     list := list { first = 24, rest = list };
     printi(point.x);
     printi(point.y);
@@ -98,6 +200,18 @@ in (
     printi(p10.y);
     printi(array_of_vec[10].y);
     print(string);
-    printi(list.first)
+    printi(list.first);
+
+    printi(pos.x);
+    printi(pos.y);
+    pos.y := 100;
+    printi(pos.x);
+    printi(pos.y);
+    pos.x := 200;
+    printi(pos.x);
+    printi(pos.y);
+    printi(pos10.x);
+    printi(pos10.y);
+    printi(array_of_vector[10].y)
 )
 end

@@ -22,6 +22,9 @@
 // Type, Size, Is pointer.
 pub const ARRAY_DATA_LAYOUT_SIZE: usize = 3;
 
+// Type, String of is pointer, Vtable pointer.
+pub const CLASS_DATA_LAYOUT_SIZE: usize = 3;
+
 // Type, String of is pointer.
 pub const RECORD_DATA_LAYOUT_SIZE: usize = 2;
 

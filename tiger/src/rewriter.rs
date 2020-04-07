@@ -7,8 +7,6 @@ use ast::{
     Expr,
     ExprWithPos,
     RecordField,
-    Var,
-    VarWithPos,
 };
 use position::{Pos, WithPos};
 use symbol::{Symbol, Symbols};
@@ -52,7 +50,7 @@ impl<'a> Rewriter<'a> {
             Expr::Assign { expr, var } => {
                 WithPos::new(Expr::Assign {
                     expr: Box::new(self.rewrite(*expr)),
-                    var: self.rewrite_var(var),
+                    var: Box::new(self.rewrite(*var)),
                 }, pos)
             },
             Expr::Break => WithPos::new(Expr::Break, pos),
@@ -80,6 +78,12 @@ impl<'a> Rewriter<'a> {
                 else {
                     add_declarations(call, declarations, pos)
                 }
+            },
+            Expr::Field { ident, this } => {
+                WithPos::new(Expr::Field {
+                    ident,
+                    this: Box::new(self.rewrite(*this)),
+                }, pos)
             },
             Expr::If { else_, test, then } => {
                 // TODO: extract then and else?
@@ -117,6 +121,33 @@ impl<'a> Rewriter<'a> {
                     declarations: new_declarations,
                 }, pos)
             },
+            Expr::MethodCall { args, method, this } => {
+                let mut new_args = vec![];
+                let mut declarations = vec![];
+                for arg in args {
+                    if can_extract(&arg) {
+                        let (name, declaration) = self.extract(arg);
+                        declarations.push(WithPos::new(declaration, pos));
+                        new_args.push(variable(name, pos));
+                    }
+                    else {
+                        new_args.push(self.rewrite(arg));
+                    }
+                }
+                let call = WithPos::new(Expr::MethodCall {
+                    args: new_args,
+                    method,
+                    this: Box::new(self.rewrite(*this)),
+                }, pos);
+
+                if declarations.is_empty() {
+                    call
+                }
+                else {
+                    add_declarations(call, declarations, pos)
+                }
+            },
+            Expr::New { class_name } => WithPos::new(Expr::New { class_name }, pos),
             Expr::Nil => WithPos::new(Expr::Nil, pos),
             Expr::Oper { left, right, oper } => {
                 let mut declarations = vec![];
@@ -189,7 +220,13 @@ impl<'a> Rewriter<'a> {
                 WithPos::new(Expr::Sequence(new_exprs), pos)
             },
             Expr::Str { value } => WithPos::new(Expr::Str { value }, pos),
-            Expr::Variable(var) => WithPos::new(Expr::Variable(self.rewrite_var(var)), pos),
+            Expr::Subscript { expr, this } => {
+                WithPos::new(Expr::Subscript {
+                    expr: Box::new(self.rewrite(*expr)),
+                    this: Box::new(self.rewrite(*this)),
+                }, pos)
+            },
+            Expr::Variable(var) => WithPos::new(Expr::Variable(var), pos),
             Expr::While { body, test } => {
                 // TODO: extract.
                 WithPos::new(Expr::While {
@@ -203,6 +240,18 @@ impl<'a> Rewriter<'a> {
     fn rewrite_dec(&mut self, mut declaration: DeclarationWithPos) -> DeclarationWithPos {
         declaration.node =
             match declaration.node {
+                Declaration::ClassDeclaration { declarations, name, parent_class } => {
+                    let declarations =
+                        declarations
+                            .into_iter()
+                            .map(|declaration| self.rewrite_dec(declaration))
+                            .collect();
+                    Declaration::ClassDeclaration {
+                        declarations,
+                        name,
+                        parent_class,
+                    }
+                },
                 Declaration::Function(functions) => {
                     let mut new_functions = vec![];
                     for mut function in functions {
@@ -211,9 +260,7 @@ impl<'a> Rewriter<'a> {
                         for param in &function.node.params {
                             declarations.push(WithPos::new(Declaration::VariableDeclaration {
                                 escape: false,
-                                init: WithPos::new(Expr::Variable(WithPos::new(
-                                    Var::Simple { ident: WithPos::new(param.node.name, param.pos) },
-                                    param.pos)), param.pos),
+                                init: WithPos::new(Expr::Variable(WithPos::new(param.node.name, param.pos)), param.pos),
                                 name: param.node.name,
                                 typ: None,
                             }, param.pos));
@@ -238,26 +285,6 @@ impl<'a> Rewriter<'a> {
             };
         declaration
     }
-
-    fn rewrite_var(&mut self, mut var: VarWithPos) -> VarWithPos {
-        var.node =
-            match var.node {
-                Var::Field { ident, this } => {
-                    Var::Field {
-                        ident,
-                        this: Box::new(self.rewrite_var(*this)),
-                    }
-                },
-                Var::Simple { ident } => Var::Simple { ident },
-                Var::Subscript { expr, this } => {
-                    Var::Subscript {
-                        expr: Box::new(self.rewrite(*expr)),
-                        this: Box::new(self.rewrite_var(*this)),
-                    }
-                },
-            };
-        var
-    }
 }
 
 fn add_declarations(body: ExprWithPos, declarations: Vec<DeclarationWithPos>, pos: Pos) -> ExprWithPos {
@@ -275,6 +302,5 @@ fn can_extract(expr: &ExprWithPos) -> bool {
 }
 
 fn variable(name: Symbol, pos: Pos) -> ExprWithPos {
-    WithPos::new(Expr::Variable(
-            WithPos::new(Var::Simple { ident: WithPos::new(name, pos) }, pos)
-    ), pos)}
+    WithPos::new(Expr::Variable(WithPos::new(name, pos)), pos)
+}

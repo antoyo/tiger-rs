@@ -122,6 +122,13 @@ extern fn stringEqual(string1: *const c_char, string2: *const c_char) -> i64 {
 }
 
 #[no_mangle]
+extern fn allocClass(data_layout: *const c_char) -> i64 {
+    GARBAGE_COLLECTOR.with(|collector| {
+        collector.borrow_mut().allocate(Layout::Class(data_layout))
+    })
+}
+
+#[no_mangle]
 extern fn allocRecord(data_layout: *const c_char) -> i64 {
     GARBAGE_COLLECTOR.with(|collector| {
         collector.borrow_mut().allocate(Layout::Record(data_layout))

@@ -23,7 +23,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use ast::Operator;
-use data_layout::{ARRAY_DATA_LAYOUT_SIZE, RECORD_DATA_LAYOUT_SIZE};
+use data_layout::{
+    ARRAY_DATA_LAYOUT_SIZE,
+    CLASS_DATA_LAYOUT_SIZE,
+    RECORD_DATA_LAYOUT_SIZE,
+};
 use frame::{Fragment, Frame, Memory};
 use ir;
 use ir::BinOp::{
@@ -60,6 +64,7 @@ use ir::_Statement::{
     Move,
     Sequence,
 };
+use semant::{FieldType, VTABLE_OFFSET};
 use temp::{Label, Temp, TempMap};
 
 #[allow(type_alias_bounds)]
@@ -140,15 +145,20 @@ pub fn binary_oper(op: Operator, left: Exp, right: Exp) -> Exp {
     }
 }
 
-pub fn field_access<F: Frame>(var: Exp, field_index: usize) -> Exp {
+pub fn field_access<F: Frame>(var: Exp, field_index: usize, field_type: FieldType) -> Exp {
+    let offset =
+        match field_type {
+            FieldType::Class => CLASS_DATA_LAYOUT_SIZE,
+            FieldType::Record => RECORD_DATA_LAYOUT_SIZE,
+        };
     Mem(Box::new(BinOp {
         op: Plus,
         left: Box::new(var),
-        right: Box::new(Const(F::WORD_SIZE * (field_index + RECORD_DATA_LAYOUT_SIZE) as i64)),
+        right: Box::new(Const(F::WORD_SIZE * (field_index + offset) as i64)),
     }))
 }
 
-pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut arguments: Vec<Exp>, parent_level: &Level<F>,
+fn call<F: Clone + Frame + PartialEq>(function: Exp, mut arguments: Vec<Exp>, parent_level: &Level<F>,
     current_level: &Level<F>, collectable_return_type: bool) -> Exp
 {
     if *current_level == *parent_level {
@@ -184,9 +194,31 @@ pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, mut arguments:
     Call {
         arguments,
         collectable_return_type,
-        function_expr: Box::new(Name(label.clone())),
+        function_expr: Box::new(function),
         return_label: Label::new(),
     }
+}
+
+pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, arguments: Vec<Exp>, parent_level: &Level<F>,
+    current_level: &Level<F>, collectable_return_type: bool) -> Exp
+{
+    call(Name(label.clone()), arguments, parent_level, current_level, collectable_return_type)
+}
+
+pub fn method_call<F: Clone + Frame + PartialEq>(index: usize, arguments: Vec<Exp>, parent_level: &Level<F>,
+    current_level: &Level<F>, collectable_return_type: bool) -> Exp
+{
+    let vtable = Mem(Box::new(BinOp {
+        op: Plus,
+        left: Box::new(arguments[0].clone()),
+        right: Box::new(Const(F::WORD_SIZE * VTABLE_OFFSET as i64)),
+    }));
+    let function_ptr = Mem(Box::new(BinOp {
+        op: Plus,
+        left: Box::new(vtable),
+        right: Box::new(Const(F::WORD_SIZE * index as i64)),
+    }));
+    call(function_ptr, arguments, parent_level, current_level, collectable_return_type)
 }
 
 pub fn goto(label: Label) -> Exp {
@@ -285,6 +317,44 @@ pub fn num(number: i64) -> Exp {
     Const(number)
 }
 
+pub fn class_create<F: Frame + PartialEq>(var: Access<F>, data_layout: Exp, fields: Vec<Exp>, vtable_name: Label) -> Exp {
+    let level = var.0.clone();
+    let result = simple_var(var, &level);
+
+    let mut sequence = Move(result.clone(), F::external_call("allocClass", vec![data_layout], true)).into();
+    sequence = Sequence(
+        Box::new(sequence),
+        Box::new(Move(Mem(Box::new(BinOp {
+            op: Plus,
+            left: Box::new(result.clone()),
+            right: Box::new(Const(VTABLE_OFFSET as i64 * F::WORD_SIZE)),
+        })), Exp::Name(vtable_name)).into())
+    ).into();
+    for (index, field) in fields.into_iter().enumerate() {
+        let index = index + CLASS_DATA_LAYOUT_SIZE;
+        let temp = Exp::Temp(Temp::new());
+        sequence = Sequence(
+            Box::new(sequence),
+            Box::new(Sequence(
+                // NOTE: the field is move into a temp first to avoid GC issues.
+                // The idea is that the object field's offset won't be computed and spilled before
+                // the field is computed. If the offset is spilled, it won't be updated by the GC
+                // in case of heap relocation because it's a derived pointer.
+                Box::new(Move(temp.clone(), field).into()),
+                Box::new(Move(Mem(Box::new(BinOp {
+                    op: Plus,
+                    left: Box::new(result.clone()),
+                    right: Box::new(Const(index as i64 * F::WORD_SIZE)),
+                })), temp).into())
+            ).into()),
+        ).into();
+    }
+    ExpSequence(
+        Box::new(sequence),
+        Box::new(result),
+    )
+}
+
 pub fn record_create<F: Frame>(data_layout: Exp, fields: Vec<Exp>) -> Exp {
     if fields.is_empty() {
         return unit();
@@ -294,13 +364,21 @@ pub fn record_create<F: Frame>(data_layout: Exp, fields: Vec<Exp>) -> Exp {
     let mut sequence = Move(result.clone(), F::external_call("allocRecord", vec![data_layout], true)).into();
     for (index, field) in fields.into_iter().enumerate() {
         let index = index + RECORD_DATA_LAYOUT_SIZE;
+        let temp = Exp::Temp(Temp::new());
         sequence = Sequence(
             Box::new(sequence),
-            Box::new(Move(Mem(Box::new(BinOp {
-                op: Plus,
-                left: Box::new(result.clone()),
-                right: Box::new(Const(index as i64 * F::WORD_SIZE)),
-            })), field).into())
+            Box::new(Sequence(
+                // NOTE: the field is move into a temp first to avoid GC issues.
+                // The idea is that the record field's offset won't be computed and spilled before
+                // the field is computed. If the offset is spilled, it won't be updated by the GC
+                // in case of heap relocation because it's a derived pointer.
+                Box::new(Move(temp.clone(), field).into()),
+                Box::new(Move(Mem(Box::new(BinOp {
+                    op: Plus,
+                    left: Box::new(result.clone()),
+                    right: Box::new(Const(index as i64 * F::WORD_SIZE)),
+                })), temp).into()),
+            ).into()),
         ).into();
     }
     ExpSequence(
@@ -501,5 +579,12 @@ impl<F:Frame> Gen<F> {
         let label = Label::new();
         self.fragments.push(Fragment::Str(label.clone(), string));
         Name(label)
+    }
+
+    pub fn vtable(&mut self, class: Label, methods: Vec<Label>) {
+        self.fragments.push(Fragment::VTable {
+            class,
+            methods,
+        });
     }
 }
