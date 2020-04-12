@@ -115,7 +115,9 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
     errors: Vec<Error>,
     escaping_vars: Vec<i64>,
     gen: Gen<F>,
+    in_closure: bool,
     in_loop: bool,
+    in_pure_fun: bool,
     methods_level: HashMap<(Symbol, Symbol), Level<F>>,
     self_symbol: Symbol,
     strings: Rc<Strings>,
@@ -126,25 +128,15 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
 impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     pub fn new(env: &'a mut Env<F>, symbols: &'a mut Symbols<()>, strings: Rc<Strings>) -> Self {
         let self_symbol = symbols.symbol("self");
-        let object_symbol = symbols.symbol("Object");
-
-        let object_class = Type::Class {
-            data_layout: String::new(),
-            fields: vec![],
-            methods: vec![],
-            name: object_symbol,
-            parent_class: None,
-            unique: Unique::new(),
-            vtable_name: Label::with_name("__vtable_Object"),
-        };
-        env.enter_type(object_symbol, object_class);
         SemanticAnalyzer {
             closure_index: 0,
             env,
             errors: vec![],
             escaping_vars: vec![],
             gen: Gen::new(),
+            in_closure: false,
             in_loop: false,
+            in_pure_fun: false,
             methods_level: HashMap::new(),
             self_symbol,
             symbols,
@@ -170,6 +162,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 body,
                 name: WithPos::dummy(main_symbol),
                 params: vec![],
+                pure: false,
                 result,
             }, pos)
         ]), pos), &gen::outermost(), None);
@@ -491,7 +484,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
                 let old_escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
                 let mut levels = vec![];
-                for &WithPos { node: FuncDeclaration { ref name, ref params, ref result, .. }, .. } in declarations {
+                for &WithPos { node: FuncDeclaration { ref body, ref name, ref params, pure, ref result, .. }, .. } in declarations {
                     let func_name = name.node;
                     let formals = params.iter()
                         .map(|param| self.env.look_escape(param.node.name))
@@ -500,6 +493,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let result_type =
                         if let Some(ref result) = *result {
                             self.get_type(result, AddError)
+                        }
+                        else if pure {
+                            Type::Answer
                         }
                         else {
                             Type::Unit
@@ -516,21 +512,31 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         }
                     }
                     levels.push(level.clone());
+
+                    let env_fields = find_closure_environment(body, &self.env, level.clone());
+
                     self.env.enter_var(func_name, Entry::Fun {
+                        access_outside_vars: !env_fields.is_empty(),
                         external: false,
                         label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
                         level,
                         parameters,
+                        pure,
                         result: result_type.clone(),
                     });
                 }
 
-                for (&WithPos { node: FuncDeclaration { ref params, ref body, ref result, .. }, .. }, ref level) in
+                let old_in_pure_fun = self.in_pure_fun;
+                for (&WithPos { node: FuncDeclaration { ref params, ref body, pure, ref result, .. }, .. }, ref level) in
                     declarations.iter().zip(&levels)
                 {
+                    self.in_pure_fun = pure;
                     let result_type =
                         if let Some(ref result) = *result {
                             self.get_type(result, DontAddError)
+                        }
+                        else if pure {
+                            Type::Answer
                         }
                         else {
                             Type::Unit
@@ -552,6 +558,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.gen.proc_entry_exit(&level, exp.exp, current_temp_map, escaping_vars);
                     self.env.end_scope();
                 }
+                self.in_pure_fun = old_in_pure_fun;
                 self.escaping_vars = old_escaping_vars;
                 self.temp_map = old_temp_map;
                 None
@@ -629,13 +636,19 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 self.check_types(inner_type, &init_expr.ty, init.pos);
                 let is_pointer = self.array_contains_pointer(&ty);
                 let is_pointer = num(is_pointer as i64);
-                let exp = init_array::<F>(var, size_expr.exp, is_pointer, init_expr.exp, level);
+                let exp = init_array::<F>(var, size_expr.exp, is_pointer, init_expr.exp, level, self.in_closure);
                 ExpTy {
                     exp,
                     ty,
                 }
             },
             Expr::Assign { ref expr, ref var } => {
+                if self.in_pure_fun {
+                    self.add_error(Error::CannotAssignInPureFun {
+                        pos,
+                    });
+                    return EXP_TYPE_ERROR;
+                }
                 match var.node {
                     Expr::Field { .. } | Expr::Subscript { .. } | Expr::Variable(_) => (),
                     _ => self.add_error(Error::Assign {
@@ -666,7 +679,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 match function.node {
                     Expr::Variable(ref func) => {
                         if let Some(entry@Entry::Fun { .. }) = self.env.look_var(func.node).cloned() { // TODO: remove this clone.
-                            if let Entry::Fun { external, ref label, ref parameters, ref result, level: ref current_level } = entry {
+                            if let Entry::Fun { external, ref label, ref parameters, ref result, level: ref current_level, pure, .. } = entry {
+                                if self.in_pure_fun && !pure {
+                                    self.add_error(Error::CannotCallImpureFun {
+                                        pos,
+                                    });
+                                }
+
                                 let mut expr_args = vec![];
                                 if parameters.len() != args.len() {
                                     self.add_error(Error::InvalidNumberOfParams {
@@ -686,7 +705,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                         F::external_call(&label.to_name(), expr_args, collectable_return_type)
                                     }
                                     else {
-                                        function_call(label, expr_args, level, current_level, collectable_return_type)
+                                        function_call(label, expr_args, level, current_level, collectable_return_type, self.in_closure)
                                     };
                                 return ExpTy {
                                     exp,
@@ -699,7 +718,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     _ => self.closure_call(function, args, level, done_label),
                 }
             },
-            Expr::Closure { ref body, ref params, ref result } => {
+            Expr::Closure { ref body, ref params, pure, ref result } => {
                 let mut data_layout = String::new();
                 data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
 
@@ -746,20 +765,27 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         body: *body.clone(),
                         name: WithPos::new(func_name, pos),
                         params: params.clone(),
+                        pure: false,
                         result: result.clone(),
+                    };
+
+                let result_type =
+                    if let Some(ref result) = *result {
+                        self.get_type(result, AddError)
+                    }
+                    else if pure {
+                        Type::Answer
+                    }
+                    else {
+                        Type::Unit
                     };
 
                 {
                     let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
                     let old_escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
+                    let old_in_closure = self.in_closure;
+                    self.in_closure = true;
 
-                    let result_type =
-                        if let Some(ref result) = *result {
-                            self.get_type(result, AddError)
-                        }
-                        else {
-                            Type::Unit
-                        };
                     // TODO: error when name already exist?
                     let mut param_names = vec![];
                     let mut parameters = vec![];
@@ -774,20 +800,15 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     param_names.push(self.symbols.symbol(CLOSURE_PARAM));
                     parameters.push(record_type.clone());
                     self.env.enter_var(func_name, Entry::Fun {
+                        access_outside_vars: false, // False because the outside variables are in the closure environment.
                         external: false,
                         label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
                         level: func_level.clone(),
                         parameters: parameters.clone(),
+                        pure: false,
                         result: result_type.clone(),
                     });
 
-                    let result_type =
-                        if let Some(ref result) = function.result {
-                            self.get_type(result, DontAddError)
-                        }
-                        else {
-                            Type::Unit
-                        };
                     self.env.begin_scope();
                     for field in &env_fields {
                         self.env.enter_var(field.ident, Entry::RecordField { record: record_type.clone() });
@@ -805,6 +826,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_vars);
                     self.env.end_scope();
 
+                    self.in_closure = old_in_closure;
                     self.escaping_vars = old_escaping_vars;
                     self.temp_map = old_temp_map;
                 }
@@ -814,24 +836,16 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     parameters.push(self.get_type(&param.node.typ, DontAddError));
                 }
 
-                let return_type =
-                    if let Some(ref result) = result {
-                        self.get_type(result, DontAddError)
-                    }
-                    else {
-                        Type::Unit
-                    };
-
                 let ty = Type::Function {
                     parameters,
-                    return_type: Box::new(return_type),
+                    return_type: Box::new(result_type),
                 };
 
                 self.closure_index += 1;
 
                 let label = self.symbols.symbol(&name);
                 let mut fields = vec![WithPos::new(RecordField {
-                    expr: WithPos::new(Expr::FunctionPointer {
+                    expr: WithPos::new(Expr::ClosurePointer {
                         label,
                     }, pos),
                     ident: function_pointer_symbol,
@@ -902,9 +916,15 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     },
                 }
             },
-            Expr::FunctionPointer { label } => {
+            Expr::ClosurePointer { label } => {
                 ExpTy {
                     exp: Exp::Name(Label::with_name(&self.strings.get(label).expect("label"))),
+                    ty: Type::Int,
+                }
+            },
+            Expr::FunctionPointer { ref label } => {
+                ExpTy {
+                    exp: Exp::Name(label.clone()),
                     ty: Type::Int,
                 }
             },
@@ -1022,7 +1042,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         let result = &method_type.return_type;
                         let collectable_return_type = type_is_collectable(result);
                         let current_level = self.methods_level.get(&(class_method.class_name, method.node)).expect("level");
-                        let exp = method_call(index, expr_args, level, current_level, collectable_return_type);
+                        let exp = method_call(index, expr_args, level, current_level, collectable_return_type, self.in_closure);
                         return ExpTy {
                             exp,
                             ty: self.actual_ty(result),
@@ -1060,7 +1080,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 for field in &fields {
                     field_exprs.push(self.trans_exp(&field.value, level, done_label.clone(), false).exp);
                 }
-                let exp = class_create::<F>(access, data_layout, field_exprs, vtable_name);
+                let exp = class_create::<F>(access, data_layout, field_exprs, vtable_name, self.in_closure);
                 ExpTy {
                     exp,
                     ty: class,
@@ -1202,7 +1222,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 match self.env.look_var(ident.node).cloned() { // TODO: remove this clone.
                     Some(Entry::Var { ref access, ref typ, }) => {
                         ExpTy {
-                            exp: simple_var(access.clone(), level),
+                            exp: simple_var(access.clone(), level, self.in_closure),
                             ty: self.actual_ty(typ),
                         }
                     },
@@ -1223,6 +1243,55 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             }
                         }
                         unreachable!();
+                    },
+                    Some(Entry::Fun { access_outside_vars, ref label, ref parameters, ref result, .. }) => {
+                        // Create an empty closure for the function.
+                        if access_outside_vars {
+                            self.add_error(Error::CannotAccessOutsideVars {
+                                pos,
+                            });
+                            return EXP_TYPE_ERROR;
+                        }
+
+                        let mut data_layout = String::new();
+                        data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
+                        let data_layout = self.gen.string_literal(data_layout);
+
+                        let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
+
+                        let types = vec![(function_pointer_symbol, Type::Int)];
+
+                        let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
+                        let record_type = Type::Record {
+                            data_layout,
+                            name: closure_symbol,
+                            types,
+                            unique: Unique::new(),
+                        };
+                        self.env.enter_type(closure_symbol, record_type.clone());
+
+                        let ty = Type::Function {
+                            parameters: parameters.clone(),
+                            return_type: Box::new(result.clone()),
+                        };
+
+                        self.closure_index += 1;
+
+                        let fields = vec![WithPos::new(RecordField {
+                            expr: WithPos::new(Expr::FunctionPointer {
+                                label: label.clone(),
+                            }, pos),
+                            ident: function_pointer_symbol,
+                        }, pos)];
+
+                        let closure = self.trans_exp(&WithPos::new(Expr::Record {
+                            fields,
+                            typ: WithPos::new(closure_symbol, pos),
+                        }, pos), level, done_label, true);
+                        ExpTy {
+                            exp: closure.exp,
+                            ty,
+                        }
                     },
                     Some(Entry::RecordField { record }) => {
                         let fields =
@@ -1247,6 +1316,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             },
             Expr::While { ref body, ref test } => {
+                if self.in_pure_fun {
+                    self.add_error(Error::NoLoopInPureFun {
+                        pos,
+                    });
+                    return EXP_TYPE_ERROR;
+                }
+
                 let test_expr = self.trans_exp(test, level, done_label, true);
                 self.check_int(&test_expr, test.pos);
                 let old_in_loop = self.in_loop;
@@ -1305,6 +1381,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     unique: Unique::new(),
                 }
             },
+            Ty::Unit => Type::Unit,
         }
     }
 

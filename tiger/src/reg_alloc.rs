@@ -508,9 +508,6 @@ mod tests {
         let mut symbols = Symbols::new(Rc::clone(&strings));
         let file_symbol = symbols.symbol("no_file");
         let lexer = Lexer::new(file, file_symbol);
-        let main_symbol = symbols.symbol("main");
-        let self_symbol = symbols.symbol("self");
-        let object_symbol = symbols.symbol("Object");
         let mut parser = Parser::new(lexer, &mut symbols);
         let ast = parser.parse().expect("parse");
         let escape_env = find_escapes(&ast, Rc::clone(&strings));

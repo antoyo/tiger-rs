@@ -59,6 +59,7 @@ pub struct ClassMethod {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Array(Box<Type>, Unique),
+    Answer,
     Class {
         data_layout: std::string::String,
         fields: Vec<ClassField>,
@@ -104,6 +105,7 @@ impl Type {
 
     pub fn show(&self, symbols: &Symbols<()>) -> std::string::String {
         match *self {
+            Answer => "answer".to_string(),
             Array(ref typ, _) => {
                 format!("[{}]", typ.show(symbols))
             },

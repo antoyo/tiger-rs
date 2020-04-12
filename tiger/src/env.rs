@@ -26,9 +26,10 @@ use escape::{DepthEscape, EscapeEnv};
 use frame::Frame;
 use gen;
 use gen::{Access, Level};
+use position::WithPos;
 use symbol::{Strings, Symbol, Symbols};
 use temp::Label;
-use types::Type;
+use types::{Type, Unique};
 
 #[derive(Clone, Debug)]
 pub enum Entry<F: Clone + Frame> {
@@ -36,10 +37,12 @@ pub enum Entry<F: Clone + Frame> {
         class: Type,
     },
     Fun {
+        access_outside_vars: bool,
         external: bool,
         label: Label,
         level: Level<F>,
         parameters: Vec<Type>,
+        pure: bool,
         result: Type,
     },
     RecordField {
@@ -65,6 +68,21 @@ impl<F: Clone + Frame> Env<F> {
         let string_symbol = type_env.symbol("string");
         type_env.enter(string_symbol, Type::String);
 
+        let object_symbol = type_env.symbol("Object");
+        let answer_symbol = type_env.symbol("answer");
+        let cont_symbol = type_env.symbol("cont");
+        let string_consumer_symbol = type_env.symbol("stringConsumer");
+
+        let object_class = Type::Class {
+            data_layout: String::new(),
+            fields: vec![],
+            methods: vec![],
+            name: object_symbol,
+            parent_class: None,
+            unique: Unique::new(),
+            vtable_name: Label::with_name("__vtable_Object"),
+        };
+
         let var_env = Symbols::new(Rc::clone(strings));
         let mut env = Self {
             escape_env,
@@ -72,20 +90,34 @@ impl<F: Clone + Frame> Env<F> {
             var_env,
         };
 
-        for (name, (param_types, return_type)) in external_functions() {
-            env.add_function(name, param_types, return_type);
+        for (name, (param_types, return_type, pure)) in env.external_functions() {
+            env.add_function(name, param_types, return_type, pure);
         }
+
+        env.enter_type(object_symbol, object_class);
+
+        env.enter_type(answer_symbol, Type::Answer);
+        env.enter_type(cont_symbol, Type::Function {
+            parameters: vec![],
+            return_type: Box::new(Type::Answer),
+        });
+        env.enter_type(string_consumer_symbol, Type::Function {
+            parameters: vec![Type::String],
+            return_type: Box::new(Type::Answer),
+        });
 
         env
     }
 
-    fn add_function(&mut self, name: &str, parameters: Vec<Type>, result: Type) {
+    fn add_function(&mut self, name: &str, parameters: Vec<Type>, result: Type, pure: bool) {
         let symbol = self.var_env.symbol(name);
         let entry = Entry::Fun {
+            access_outside_vars: false,
             external: true,
             label: Label::with_name(name),
             level: gen::outermost(), // FIXME: Might want to create a new level.
             parameters,
+            pure,
             result,
         };
         self.var_env.enter(symbol, entry);
@@ -145,25 +177,30 @@ impl<F: Clone + Frame> Env<F> {
     pub fn var_name(&self, symbol: Symbol) -> String {
         self.var_env.name(symbol)
     }
-}
 
-pub fn external_functions() -> BTreeMap<&'static str, (Vec<Type>, Type)> {
-    let mut functions = BTreeMap::new();
-    functions.insert("print", (vec![Type::String], Type::Unit));
-    functions.insert("printi", (vec![Type::Int], Type::Unit));
-    functions.insert("flush", (vec![], Type::Unit));
-    functions.insert("getchar", (vec![], Type::String));
-    functions.insert("ord", (vec![Type::String], Type::Int));
-    functions.insert("chr", (vec![Type::Int], Type::String));
-    functions.insert("size", (vec![Type::String], Type::Int));
-    functions.insert("substring", (vec![Type::String, Type::Int, Type::Int], Type::String));
-    functions.insert("concat", (vec![Type::String, Type::String], Type::String));
-    functions.insert("not", (vec![Type::Int], Type::Int));
-    functions.insert("exit", (vec![Type::Int], Type::Unit));
-    functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int));
+    pub fn external_functions(&mut self) -> BTreeMap<&'static str, (Vec<Type>, Type, bool)> {
+        let mut functions = BTreeMap::new();
+        functions.insert("print", (vec![Type::String], Type::Unit, false));
+        functions.insert("printi", (vec![Type::Int], Type::Unit, false));
+        functions.insert("flush", (vec![], Type::Unit, false));
+        functions.insert("getchar", (vec![], Type::String, false));
+        functions.insert("ord", (vec![Type::String], Type::Int, true));
+        functions.insert("chr", (vec![Type::Int], Type::String, true));
+        functions.insert("size", (vec![Type::String], Type::Int, true));
+        functions.insert("substring", (vec![Type::String, Type::Int, Type::Int], Type::String, true));
+        functions.insert("concat", (vec![Type::String, Type::String], Type::String, true));
+        functions.insert("not", (vec![Type::Int], Type::Int, true));
+        functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int, true));
 
-    functions.insert("allocClass", (vec![Type::Int], Type::Int));
-    functions.insert("allocRecord", (vec![Type::Int], Type::Int));
-    functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int));
-    functions
+        let cont = Type::Name(WithPos::dummy(self.type_env.symbol("cont")), None);
+        functions.insert("printP", (vec![Type::String, cont.clone()], Type::Answer, true));
+        functions.insert("flushP", (vec![cont], Type::Answer, true));
+        functions.insert("getcharP", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer, true));
+        functions.insert("exit", (vec![], Type::Answer, true));
+
+        functions.insert("allocClass", (vec![Type::Int], Type::Int, true));
+        functions.insert("allocRecord", (vec![Type::Int], Type::Int, true));
+        functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int, true));
+        functions
+    }
 }

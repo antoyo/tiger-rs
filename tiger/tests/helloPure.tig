@@ -1,0 +1,11 @@
+let pure function cont() =
+    getcharP(pure function(char: string) =
+        let pure function next() =
+            printP("\n", exit)
+        in
+            printP(char, next)
+        end
+    )
+in
+    printP("Hello, World!\n", cont)
+end

@@ -1,0 +1,33 @@
+let pure function test() =
+    let var integer := 12
+        type Point = {
+                x: int,
+                y: int
+            }
+        var point := Point {
+            x = 42,
+            y = 24
+        }
+
+        var buffer := getchar()
+    in
+        integer := 13;
+        point.x := 12;
+        print("Hello, World!\n");
+        flush();
+
+        let var i := 0
+        in
+            while i < 10 do (
+                printi(i);
+                break;
+                i := i + 1
+            )
+        end;
+
+        for i := 0 to 10 do
+            printi(i)
+    end
+in
+    test()
+end

@@ -252,6 +252,14 @@ impl<'a, R: Read> Parser<'a, R> {
     }
 
     fn closure(&mut self) -> Result<ExprWithPos> {
+        let pure =
+            if self.peek()?.token == Pure {
+                eat!(self, Pure);
+                true
+            }
+            else {
+                false
+            };
         let pos = eat!(self, Function);
         eat!(self, OpenParen);
         let params = fields!(self, CloseParen);
@@ -263,6 +271,7 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(WithPos::new(Expr::Closure {
             body,
             params,
+            pure,
             result,
         }, pos))
     }
@@ -270,7 +279,7 @@ impl<'a, R: Read> Parser<'a, R> {
     fn dec(&mut self) -> Result<DeclarationWithPos> {
         match self.peek()?.token {
             Class => self.class_dec(),
-            Function => self.fun_decs(Function),
+            Pure | Function => self.fun_decs(Function),
             Method => self.fun_decs(Method),
             Type => self.ty_decs(),
             Var => self.var_dec(),
@@ -384,7 +393,7 @@ impl<'a, R: Read> Parser<'a, R> {
                     })
                 ),
                 then:
-                    Box::new(WithPos::dummy(Expr::While {
+                    Box::new(WithPos::new(Expr::While {
                         body: Box::new(WithPos::dummy(Expr::Sequence(vec![
                             body,
                             WithPos::dummy(Expr::If {
@@ -409,7 +418,7 @@ impl<'a, R: Read> Parser<'a, R> {
                         test: Box::new(WithPos::dummy(Expr::Int {
                             value: 1,
                         })),
-                    })),
+                    }, pos)),
             };
 
         Ok(WithPos::new(Expr::Let {
@@ -429,6 +438,14 @@ impl<'a, R: Read> Parser<'a, R> {
     }
 
     fn fun_dec(&mut self, token: Tok) -> Result<FuncDeclarationWithPos> {
+        let pure =
+            if self.peek()?.token == Pure {
+                eat!(self, Pure);
+                true
+            }
+            else {
+                false
+            };
         let tok = self.token()?;
         assert!(tok.token == token);
         let pos = tok.pos;
@@ -445,6 +462,7 @@ impl<'a, R: Read> Parser<'a, R> {
             body,
             name,
             params,
+            pure,
             result,
         }, pos))
     }
@@ -482,7 +500,7 @@ impl<'a, R: Read> Parser<'a, R> {
     fn let_expr(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Let);
         let mut declarations = vec![self.dec()?];
-        while let Class | Function | Type | Var = self.peek()?.token {
+        while let Class | Function | Pure | Type | Var = self.peek()?.token {
             declarations.push(self.dec()?);
         }
         eat!(self, In, "class, function, in, type, var".to_string());
@@ -623,7 +641,7 @@ impl<'a, R: Read> Parser<'a, R> {
         match self.peek()?.token {
             Break => self.break_(),
             For => self.for_loop(),
-            Function => self.closure(),
+            Function | Pure => self.closure(),
             If => self.if_then_else(),
             Ident(_) => self.call_expr_or_other(),
             Int(_) => self.int_lit(),
@@ -725,6 +743,7 @@ impl<'a, R: Read> Parser<'a, R> {
         match self.peek()?.token {
             Array => self.arr_ty(),
             OpenCurly => self.rec_ty(),
+            OpenParen => self.unit_ty(),
             Ident(_) => {
                 let type_name;
                 let pos = eat!(self, Ident, type_name);
@@ -815,6 +834,12 @@ impl<'a, R: Read> Parser<'a, R> {
             },
             _ => self.primary_expr(),
         }
+    }
+
+    fn unit_ty(&mut self) -> Result<TyWithPos> {
+        let pos = eat!(self, OpenParen);
+        let end_pos = eat!(self, CloseParen);
+        Ok(WithPos::new(Ty::Unit, pos.grow(end_pos)))
     }
 
     fn var_dec(&mut self) -> Result<DeclarationWithPos> {

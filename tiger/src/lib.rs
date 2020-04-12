@@ -38,10 +38,11 @@ mod data_layout;
 use std::ffi::CStr;
 //use std::process;
 use std::io::{Read, Write, stdin, stdout};
-use std::os::raw::c_char;
+use std::mem;
+use std::os::raw::{c_char, c_void};
 
 use collector::{Layout, GARBAGE_COLLECTOR};
-use data_layout::STRING_DATA_LAYOUT_SIZE;
+use data_layout::{RECORD_DATA_LAYOUT_SIZE, STRING_DATA_LAYOUT_SIZE};
 
 const WORD_SIZE: usize = 8;
 
@@ -87,6 +88,15 @@ extern fn getchar() -> *const c_char {
         *string_ptr = 0;
     }
     string
+}
+
+#[no_mangle]
+extern fn getcharP(continuation: *const c_void) {
+    let char = getchar();
+    unsafe {
+        let function: fn(*const c_char) = mem::transmute(get_function_pointer(continuation));
+        function(char);
+    }
 }
 
 #[no_mangle]
@@ -151,6 +161,13 @@ extern fn print(string: *const c_char) {
 }
 
 #[no_mangle]
+extern fn printP(string: *const c_char, continuation: *const c_void) {
+    print(string);
+    let function = get_function_pointer(continuation);
+    function();
+}
+
+#[no_mangle]
 extern fn printi(num: i32) {
     println!("{}", num);
 }
@@ -160,6 +177,13 @@ fn string_offset(ptr: *const c_char) -> *const c_char {
     let ptr = ptr as *const usize;
     unsafe {
         ptr.add(STRING_DATA_LAYOUT_SIZE) as *const c_char
+    }
+}
+
+fn get_function_pointer(closure: *const c_void) -> fn() {
+    let ptr = closure as *const usize;
+    unsafe {
+        mem::transmute(*ptr.offset(RECORD_DATA_LAYOUT_SIZE as isize))
     }
 }
 

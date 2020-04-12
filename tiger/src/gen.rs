@@ -159,9 +159,13 @@ pub fn field_access<F: Frame>(var: Exp, field_index: usize, field_type: FieldTyp
 }
 
 fn call<F: Clone + Frame + PartialEq>(function: Exp, mut arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>, collectable_return_type: bool) -> Exp
+    current_level: &Level<F>, collectable_return_type: bool, in_closure: bool) -> Exp
 {
     if *current_level == *parent_level {
+        if in_closure {
+            panic!("Trying to access static link from inside a closure for a recursive call");
+        }
+
         // For a recursive call, we simply pass the current static link, which represents the stack
         // frame of the parent function.
         let frame = current_level.current.borrow();
@@ -173,6 +177,11 @@ fn call<F: Clone + Frame + PartialEq>(function: Exp, mut arguments: Vec<Exp>, pa
         arguments.push(Exp::Temp(F::fp()));
     }
     else {
+        // TODO: print an error as well.
+        if in_closure {
+            panic!("Trying to access static link from inside a closure");
+        }
+
         // When calling a function defined in a parent frame, go up throught the static links.
         let mut function_level = parent_level;
         let mut var = Exp::Temp(F::fp());
@@ -200,9 +209,9 @@ fn call<F: Clone + Frame + PartialEq>(function: Exp, mut arguments: Vec<Exp>, pa
 }
 
 pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>, collectable_return_type: bool) -> Exp
+    current_level: &Level<F>, collectable_return_type: bool, in_closure: bool) -> Exp
 {
-    call(Name(label.clone()), arguments, parent_level, current_level, collectable_return_type)
+    call(Name(label.clone()), arguments, parent_level, current_level, collectable_return_type, in_closure)
 }
 
 pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp {
@@ -215,7 +224,7 @@ pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collect
 }
 
 pub fn method_call<F: Clone + Frame + PartialEq>(index: usize, arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>, collectable_return_type: bool) -> Exp
+    current_level: &Level<F>, collectable_return_type: bool, in_closure: bool) -> Exp
 {
     let vtable = Mem(Box::new(BinOp {
         op: Plus,
@@ -227,7 +236,7 @@ pub fn method_call<F: Clone + Frame + PartialEq>(index: usize, arguments: Vec<Ex
         left: Box::new(vtable),
         right: Box::new(Const(F::WORD_SIZE * index as i64)),
     }));
-    call(function_ptr, arguments, parent_level, current_level, collectable_return_type)
+    call(function_ptr, arguments, parent_level, current_level, collectable_return_type, in_closure)
 }
 
 pub fn goto(label: Label) -> Exp {
@@ -274,13 +283,13 @@ pub fn if_expression<F: Clone + Frame>(test_expr: Exp, if_expr: Exp, else_expr: 
     )
 }
 
-pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_expr: Exp, is_pointer: Exp, init_expr: Exp, level: &Level<F>) -> Exp {
+pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_expr: Exp, is_pointer: Exp, init_expr: Exp, level: &Level<F>, in_closure: bool) -> Exp {
     // FIXME: it does many allocations for a 2D array.
     let temp = Temp::new();
     let result =
         if let Some(var) = var.clone() {
             let level = var.0.clone();
-            simple_var(var, &level)
+            simple_var(var, &level, in_closure)
         }
         else {
             Exp::Temp(temp)
@@ -326,9 +335,9 @@ pub fn num(number: i64) -> Exp {
     Const(number)
 }
 
-pub fn class_create<F: Frame + PartialEq>(var: Access<F>, data_layout: Exp, fields: Vec<Exp>, vtable_name: Label) -> Exp {
+pub fn class_create<F: Frame + PartialEq>(var: Access<F>, data_layout: Exp, fields: Vec<Exp>, vtable_name: Label, in_closure: bool) -> Exp {
     let level = var.0.clone();
-    let result = simple_var(var, &level);
+    let result = simple_var(var, &level, in_closure);
 
     let mut sequence = Move(result.clone(), F::external_call("allocClass", vec![data_layout], true)).into();
     sequence = Sequence(
@@ -433,13 +442,17 @@ pub fn relational_oper<F: Clone + Frame>(op: Operator, left: Exp, right: Exp, le
     )
 }
 
-pub fn simple_var<F: Clone + Frame + PartialEq>(access: Access<F>, level: &Level<F>) -> Exp {
+pub fn simple_var<F: Clone + Frame + PartialEq>(access: Access<F>, level: &Level<F>, in_closure: bool) -> Exp {
     let mut function_level = level;
     let var_level = access.0;
     let frame = level.current.borrow();
     let mut var = Exp::Temp(F::fp());
     // Add the offset of each parent frames (static link).
     while function_level.current != var_level.current {
+        if in_closure {
+            panic!("Trying to access static link from inside a closure");
+        }
+
         var = frame.exp(function_level.current.borrow().formals().last().expect("static link").clone(), var);
         function_level = function_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
     }

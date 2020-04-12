@@ -41,6 +41,15 @@ pub enum Error {
     BreakOutsideLoop {
         pos: Pos,
     },
+    CannotAccessOutsideVars {
+        pos: Pos,
+    },
+    CannotAssignInPureFun {
+        pos: Pos,
+    },
+    CannotCallImpureFun {
+        pos: Pos,
+    },
     CannotIndex {
         pos: Pos,
         typ: Type,
@@ -79,6 +88,9 @@ pub enum Error {
     },
     Msg(String),
     Multi(Vec<Error>),
+    NoLoopInPureFun {
+        pos: Pos,
+    },
     NotAClass {
         pos: Pos,
         typ: Type,
@@ -147,6 +159,21 @@ impl Error {
                 eprintln!("Break statement used outside of loop{}", terminal.end_bold());
                 pos.show(symbols, terminal);
             },
+            CannotCallImpureFun { pos } => {
+                eprintln!("Cannot call impure functions in pure functions{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            CannotAccessOutsideVars { pos } => {
+                eprintln!("Cannot convert into a closure a function that accesses variables declared outside of it{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            CannotAssignInPureFun { pos } => {
+                eprintln!("Cannot assign in pure functions{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
             CannotIndex { pos, ref typ } => {
                 eprintln!("Cannot index value of type `{}`{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal)
@@ -186,6 +213,11 @@ impl Error {
             },
             Msg(ref string) => eprintln!("{}", string),
             Multi(_) => unreachable!(),
+            NoLoopInPureFun { pos } => {
+                eprintln!("Cannot use loops in pure functions{}", terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
             NotAClass { pos, ref typ } => {
                 eprintln!("Type `{}` is not a class type{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal);

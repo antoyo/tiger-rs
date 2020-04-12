@@ -21,6 +21,7 @@
 
 use position::WithPos;
 use symbol::{Symbol, SymbolWithPos};
+use temp::Label;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
@@ -60,18 +61,22 @@ pub enum Expr {
     Closure {
         body: Box<ExprWithPos>,
         params: Vec<FieldWithPos>,
+        pure: bool,
         result: Option<SymbolWithPos>,
     },
     ClosureParamField {
         ident: SymbolWithPos,
         this: Box<ExprWithPos>,
     },
+    ClosurePointer {
+        label: Symbol,
+    },
     Field {
         ident: SymbolWithPos,
         this: Box<ExprWithPos>,
     },
     FunctionPointer {
-        label: Symbol,
+        label: Label,
     },
     FunctionPointerCall {
         args: Vec<ExprWithPos>,
@@ -139,6 +144,7 @@ pub struct FuncDeclaration {
     pub body: ExprWithPos,
     pub name: SymbolWithPos,
     pub params: Vec<FieldWithPos>,
+    pub pure: bool,
     pub result: Option<SymbolWithPos>,
 }
 
@@ -185,6 +191,7 @@ pub enum Ty {
     Record {
         fields: Vec<FieldWithPos>,
     },
+    Unit,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -1,0 +1,50 @@
+/* FIXME: this does not work because closures were implemented without static links. */
+let type intConsumer = int -> answer
+
+    pure function isDigit(s: string) : int =
+        ord(s) >= ord("0") & ord(s) <= ord("9")
+
+    pure function getInt(done: intConsumer) =
+        let var nextDigit := pure function(accum: int) =
+            let var eatChar := pure function(dig: string) =
+                if isDigit(dig) then
+                    nextDigit(accum * 10 + ord(dig))
+                else
+                    done(accum)
+            in
+                getcharP(eatChar)
+            end
+        in
+            nextDigit(0)
+        end
+
+    pure function putInt(i: int, c: cont) =
+        if i = 0 then
+            c()
+        else
+            let var rest := i / 10
+                var dig := i - rest * 10
+                var doDigit := pure function() =
+                    printP(chr(dig), c)
+            in
+                putInt(rest, doDigit)
+            end
+
+    pure function factorial(i: int) : int =
+        if i = 0 then
+            1
+        else
+            i * factorial(i - 1)
+
+    pure function loop(i: int) =
+        if i > 12 then
+            exit()
+        else
+            let pure function next() =
+                getInt(loop)
+            in
+                putInt(factorial(i), next)
+            end
+in
+    getInt(loop)
+end

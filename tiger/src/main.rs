@@ -125,7 +125,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
             writeln!(file, "global {}", POINTER_MAP_NAME)?;
             writeln!(file, "global {}", END_MARKER)?;
 
-            for (function_name, _) in env::external_functions() {
+            for (function_name, _) in env.external_functions() {
                 writeln!(file, "extern {}", function_name)?;
             }
             writeln!(file)?;

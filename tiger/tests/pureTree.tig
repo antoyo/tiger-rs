@@ -1,0 +1,76 @@
+let type key = int
+    type binding = string
+    type tree = {
+        key: key,
+        binding: binding,
+        left: tree,
+        right: tree
+    }
+
+    pure function look(t: tree, k: key): binding =
+        if t = nil then
+            "<not-found>"
+        else if k < t.key then
+            look(t.left, k)
+        else if k > t.key then
+            look(t.right, k)
+        else
+            t.binding
+
+    pure function enter(t: tree, k: key, b: binding): tree =
+        if t = nil then
+            tree {
+                key = k,
+                binding = b,
+                left = nil,
+                right = nil
+            }
+        else if k < t.key then
+            tree {
+                key = t.key,
+                binding = t.binding,
+                left = enter(t.left, k, b),
+                right = t.right
+            }
+        else if k > t.key then
+            tree {
+                key = t.key,
+                binding = t.binding,
+                left = t.left,
+                right = enter(t.right, k, b)
+            }
+        else
+            tree {
+                key = t.key,
+                binding = b,
+                left = t.left,
+                right = t.right
+            }
+
+    var tree := tree {
+        key = 10,
+        binding = "10",
+        left = tree {
+            key = 5,
+            binding = "5",
+            left = nil,
+            right = nil
+        },
+        right = tree {
+            key = 15,
+            binding = "15",
+            left = nil,
+            right = nil
+        }
+    }
+in
+    print(look(tree, 15));
+    print("\n");
+    let var newTree := enter(tree, 20, "20")
+    in
+        print(look(tree, 20));
+        print("\n");
+        print(look(newTree, 20));
+        print("\n")
+    end
+end

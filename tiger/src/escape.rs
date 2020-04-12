@@ -118,7 +118,7 @@ impl EscapeFinder {
                     }
                 }
             },
-            Expr::FunctionPointer { .. } => (),
+            Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
             Expr::FunctionPointerCall { ref args, .. } => {
                 for arg in args {
                     self.visit_exp(arg, depth);

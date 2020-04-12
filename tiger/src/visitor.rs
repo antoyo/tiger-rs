@@ -84,7 +84,7 @@ pub trait Visitor {
                 self.visit_exp(this),
             Expr::Field { ref this, .. } =>
                 self.visit_exp(this),
-            Expr::FunctionPointer { .. } => (),
+            Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
             Expr::FunctionPointerCall { ref args, ref function, .. } => {
                 self.visit_exp(function);
                 for arg in args {

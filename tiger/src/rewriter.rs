@@ -83,10 +83,11 @@ impl<'a> Rewriter<'a> {
                     add_declarations(call, declarations, pos)
                 }
             },
-            Expr::Closure { body, params, result } => {
+            Expr::Closure { body, params, pure, result } => {
                 WithPos::new(Expr::Closure {
                     body: Box::new(self.rewrite(*body)),
                     params,
+                    pure,
                     result,
                 }, pos)
             },
@@ -94,6 +95,11 @@ impl<'a> Rewriter<'a> {
                 WithPos::new(Expr::ClosureParamField {
                     ident,
                     this: Box::new(self.rewrite(*this)),
+                }, pos)
+            },
+            Expr::ClosurePointer { label } => {
+                WithPos::new(Expr::ClosurePointer {
+                    label,
                 }, pos)
             },
             Expr::Field { ident, this } => {
