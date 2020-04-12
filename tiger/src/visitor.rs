@@ -74,15 +74,19 @@ pub trait Visitor {
             },
             Expr::Break => {
             },
-            Expr::Closure { ref body, .. } => {
-                self.visit_exp(body);
-            },
             Expr::Call { ref args, ref function } => {
                 self.visit_call(function, args);
             },
-            Expr::ClosureParamField { .. } | Expr::Field { .. } => (),
+            Expr::Closure { ref body, .. } => {
+                self.visit_exp(body);
+            },
+            Expr::ClosureParamField { ref this, .. } =>
+                self.visit_exp(this),
+            Expr::Field { ref this, .. } =>
+                self.visit_exp(this),
             Expr::FunctionPointer { .. } => (),
-            Expr::FunctionPointerCall { ref args, .. } => {
+            Expr::FunctionPointerCall { ref args, ref function, .. } => {
+                self.visit_exp(function);
                 for arg in args {
                     self.visit_exp(arg);
                 }
@@ -101,7 +105,8 @@ pub trait Visitor {
                 }
                 self.visit_exp(body);
             },
-            Expr::MethodCall { ref args, .. } => {
+            Expr::MethodCall { ref args, ref this, .. } => {
+                self.visit_exp(this);
                 for arg in args {
                     self.visit_exp(arg);
                 }

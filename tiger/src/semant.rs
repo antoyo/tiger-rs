@@ -19,7 +19,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
@@ -1465,16 +1466,31 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct ClosureField {
     ident: Symbol,
     typ: Type,
 }
 
+impl Eq for ClosureField {
+}
+
+impl PartialOrd for ClosureField {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.ident.partial_cmp(&other.ident)
+    }
+}
+
+impl Ord for ClosureField {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ident.cmp(&other.ident)
+    }
+}
+
 struct EnvFinder<'a, F: Frame> {
     closure_level: Level<F>,
     env: &'a Env<F>,
-    fields: Vec<ClosureField>,
+    fields: BTreeSet<ClosureField>,
 }
 
 impl<'a, F: Frame> EnvFinder<'a, F> {
@@ -1482,7 +1498,7 @@ impl<'a, F: Frame> EnvFinder<'a, F> {
         Self {
             closure_level,
             env,
-            fields: vec![],
+            fields: BTreeSet::new(),
         }
     }
 }
@@ -1493,7 +1509,7 @@ impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
         // TODO: support class field as well?
         if let Some(Entry::Var { ref access, ref typ, }) = self.env.look_var(ident.node) {
             if self.closure_level.current != access.0.current {
-                self.fields.push(ClosureField {
+                self.fields.insert(ClosureField {
                     ident: ident.node,
                     typ: typ.clone(),
                 });
@@ -1502,7 +1518,7 @@ impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
     }
 }
 
-fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F>, closure_level: Level<F>) -> Vec<ClosureField> {
+fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F>, closure_level: Level<F>) -> BTreeSet<ClosureField> {
     let mut finder = EnvFinder::new(env, closure_level);
     finder.visit_exp(exp);
     finder.fields
