@@ -58,6 +58,7 @@ pub struct ClassMethod {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
+    Array(Box<Type>, Unique),
     Class {
         data_layout: std::string::String,
         fields: Vec<ClassField>,
@@ -67,7 +68,13 @@ pub enum Type {
         unique: Unique,
         vtable_name: Label,
     },
+    Function {
+        parameters: Vec<Type>,
+        return_type: Box<Type>,
+    },
     Int,
+    Name(SymbolWithPos, Option<Box<Type>>),
+    Nil,
     String,
     Record {
         data_layout: Exp,
@@ -75,10 +82,7 @@ pub enum Type {
         types: Vec<(Symbol, Type)>,
         unique: Unique,
     },
-    Array(Box<Type>, Unique),
-    Nil,
     Unit,
-    Name(SymbolWithPos, Option<Box<Type>>),
     Error,
 }
 
@@ -104,6 +108,23 @@ impl Type {
                 format!("[{}]", typ.show(symbols))
             },
             Class { name, .. } => format!("class {}", symbols.name(name)),
+            Function { ref parameters, ref return_type } => {
+                let show_parens = parameters.len() != 1;
+                let mut string = std::string::String::new();
+                if show_parens {
+                    string.push('(');
+                }
+                string.push_str(&parameters.iter()
+                    .map(|param| param.show(symbols))
+                    .collect::<Vec<_>>()
+                    .join(", "));
+                if show_parens {
+                    string.push(')');
+                }
+                string.push_str(" -> ");
+                string.push_str(&return_type.show(symbols));
+                string
+            },
             Int => "int".to_string(),
             Name(_, ref typ) => {
                 if let Some(ref typ) = *typ {

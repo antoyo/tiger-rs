@@ -28,6 +28,7 @@ use self::Tok::*;
 pub enum Tok {
     Ampersand,
     Array,
+    Arrow,
     Break,
     Class,
     CloseCurly,
@@ -88,6 +89,7 @@ impl Display for Tok {
             let string = match *self {
                 Ampersand => "&",
                 Array => "array",
+                Arrow => "->",
                 Break => "break",
                 Class => "class",
                 CloseCurly => "}",

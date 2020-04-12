@@ -1,6 +1,8 @@
 /// Extract the values collectable by the GC as variables.
 /// They need to be on the stack in order to be accessible by the GC.
 
+// FIXME: the positions are wrong in some rewrite.
+
 use ast::{
     Declaration,
     DeclarationWithPos,
@@ -40,6 +42,7 @@ impl<'a> Rewriter<'a> {
         match expr.node {
             Expr::Array { init, size, typ } => {
                 // NOTE: do not rewrite the initial element of the array because it's immediately assigned a memory location in the array.
+                // FIXME: isn't the code in contradiction with the comment?
                 let init = self.rewrite(*init);
                 WithPos::new(Expr::Array {
                     init: Box::new(init),
@@ -59,6 +62,7 @@ impl<'a> Rewriter<'a> {
                 let mut declarations = vec![];
                 for arg in args {
                     if can_extract(&arg) {
+                        let pos = arg.pos;
                         let (name, declaration) = self.extract(arg);
                         declarations.push(WithPos::new(declaration, pos));
                         new_args.push(variable(name, pos));
@@ -79,11 +83,55 @@ impl<'a> Rewriter<'a> {
                     add_declarations(call, declarations, pos)
                 }
             },
+            Expr::Closure { body, params, result } => {
+                WithPos::new(Expr::Closure {
+                    body: Box::new(self.rewrite(*body)),
+                    params,
+                    result,
+                }, pos)
+            },
+            Expr::ClosureParamField { ident, this } => {
+                WithPos::new(Expr::ClosureParamField {
+                    ident,
+                    this: Box::new(self.rewrite(*this)),
+                }, pos)
+            },
             Expr::Field { ident, this } => {
                 WithPos::new(Expr::Field {
                     ident,
                     this: Box::new(self.rewrite(*this)),
                 }, pos)
+            },
+            Expr::FunctionPointer { label } => {
+                WithPos::new(Expr::FunctionPointer {
+                    label,
+                }, pos)
+            },
+            Expr::FunctionPointerCall { args, closure_name, function } => {
+                let mut new_args = vec![];
+                let mut declarations = vec![];
+                for arg in args {
+                    if can_extract(&arg) {
+                        let (name, declaration) = self.extract(arg);
+                        declarations.push(WithPos::new(declaration, pos));
+                        new_args.push(variable(name, pos));
+                    }
+                    else {
+                        new_args.push(self.rewrite(arg));
+                    }
+                }
+                let call = WithPos::new(Expr::FunctionPointerCall {
+                    args: new_args,
+                    closure_name,
+                    function,
+                }, pos);
+
+                if declarations.is_empty() {
+                    call
+                }
+                else {
+                    add_declarations(call, declarations, pos)
+                }
             },
             Expr::If { else_, test, then } => {
                 // TODO: extract then and else?

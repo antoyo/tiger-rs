@@ -87,6 +87,10 @@ pub enum Error {
         pos: Pos,
         typ: Type,
     },
+    NotCallable {
+        pos: Pos,
+        typ: Type,
+    },
     RecordType {
         pos: Pos,
     },
@@ -189,6 +193,11 @@ impl Error {
             },
             NotARecordOrClass { pos, ref typ } => {
                 eprintln!("Type `{}` is not a struct or a class type{}", typ.show(symbols), terminal.end_bold());
+                pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
+            },
+            NotCallable { pos, ref typ } => {
+                eprintln!("Type `{}` is not callable{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },

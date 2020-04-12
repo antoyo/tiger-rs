@@ -191,16 +191,30 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok((args, end_pos))
     }
 
+    fn more_calls(&mut self, mut expr: ExprWithPos) -> Result<ExprWithPos> {
+        let pos = expr.pos;
+        while let OpenParen = self.peek()?.token {
+            let (args, end_pos) = self.call_args()?;
+            expr = WithPos::new(Expr::Call {
+                args,
+                function: Box::new(expr),
+            }, pos.grow(end_pos));
+        }
+        Ok(expr)
+    }
+
     fn call_expr_or_other(&mut self) -> Result<ExprWithPos> {
         let name;
         let pos = eat!(self, Ident, name);
         let symbol = self.symbols.symbol(&name);
         if let OpenParen = self.peek()?.token {
             let (args, end_pos) = self.call_args()?;
-            Ok(WithPos::new(Expr::Call {
+            let call = WithPos::new(Expr::Call {
                 args,
-                function: symbol,
-            }, pos.grow(end_pos)))
+                function: Box::new(WithPos::new(Expr::Variable(WithPos::new(symbol, pos)), pos)),
+            }, pos.grow(end_pos));
+            let call = self.more_calls(call)?;
+            Ok(call)
         }
         else {
             match self.peek()?.token {
@@ -235,6 +249,22 @@ impl<'a, R: Read> Parser<'a, R> {
             name,
             parent_class,
         }, pos.grow(end_pos)))
+    }
+
+    fn closure(&mut self) -> Result<ExprWithPos> {
+        let pos = eat!(self, Function);
+        eat!(self, OpenParen);
+        let params = fields!(self, CloseParen);
+        eat!(self, CloseParen);
+        let result = self.optional_type()?;
+        eat!(self, Equal);
+        let body = Box::new(self.expr()?);
+        let pos = pos.grow(body.pos);
+        Ok(WithPos::new(Expr::Closure {
+            body,
+            params,
+            result,
+        }, pos))
     }
 
     fn dec(&mut self) -> Result<DeclarationWithPos> {
@@ -538,7 +568,7 @@ impl<'a, R: Read> Parser<'a, R> {
             }, pos))
         }
         else {
-            Ok(value)
+            self.more_calls(value)
         }
     }
 
@@ -593,6 +623,7 @@ impl<'a, R: Read> Parser<'a, R> {
         match self.peek()?.token {
             Break => self.break_(),
             For => self.for_loop(),
+            Function => self.closure(),
             If => self.if_then_else(),
             Ident(_) => self.call_expr_or_other(),
             Int(_) => self.int_lit(),
@@ -602,7 +633,7 @@ impl<'a, R: Read> Parser<'a, R> {
             OpenParen => self.seq_exp(),
             Str(_) => self.string_lit(),
             While => self.while_loop(),
-            _ => Err(self.unexpected_token("break, for, if, identifier, integer literal, let, nil, (, string literal, while")?),
+            _ => Err(self.unexpected_token("break, for, function, if, identifier, integer literal, let, nil, (, string literal, while")?),
         }
     }
 
@@ -665,7 +696,9 @@ impl<'a, R: Read> Parser<'a, R> {
         }
         eat!(self, CloseParen);
         let pos = exprs[0].pos;
-        Ok(WithPos::new(Expr::Sequence(exprs), pos))
+        let sequence = WithPos::new(Expr::Sequence(exprs), pos);
+        let expr = self.more_calls(sequence)?;
+        Ok(expr)
     }
 
     fn string_lit(&mut self) -> Result<ExprWithPos> {
@@ -715,16 +748,55 @@ impl<'a, R: Read> Parser<'a, R> {
     }
 
     fn ty_dec(&mut self) -> Result<TypeDecWithPos> {
-        let pos = eat!(self, Type);
+        let dec_pos = eat!(self, Type);
         let type_name;
         let name_pos = eat!(self, Ident, type_name);
-        let name = self.symbols.symbol(&type_name);
+        let name = WithPos::new(self.symbols.symbol(&type_name), name_pos);
         eat!(self, Equal);
-        let ty = self.ty()?;
-        Ok(WithPos::new(TypeDec {
-            name: WithPos::new(name, name_pos),
-            ty,
-        }, pos))
+        if let OpenParen = self.peek()?.token {
+            let pos = eat!(self, OpenParen);
+            let mut parameters = vec![];
+            loop {
+                if let CloseParen = self.peek()?.token {
+                    break;
+                }
+                let param = self.ty()?;
+                parameters.push(param);
+                match self.peek()?.token {
+                    Comma => { self.token()?; },
+                    _ => break,
+                }
+            }
+            eat!(self, CloseParen);
+
+            eat!(self, Arrow);
+            let return_type = self.ty()?;
+            let pos = pos.grow(return_type.pos);
+            let ty = WithPos::new(Ty::Function {
+                parameters,
+                return_type: Box::new(return_type),
+            }, pos);
+            Ok(WithPos::new(TypeDec {
+                name,
+                ty,
+            }, pos))
+        }
+        else {
+            let mut ty = self.ty()?;
+            if let Arrow = self.peek()?.token {
+                eat!(self, Arrow);
+                let return_type = self.ty()?;
+                let pos = ty.pos.grow(return_type.pos);
+                ty = WithPos::new(Ty::Function {
+                    parameters: vec![ty],
+                    return_type: Box::new(return_type),
+                }, pos);
+            }
+            Ok(WithPos::new(TypeDec {
+                name,
+                ty,
+            }, dec_pos))
+        }
     }
 
     fn unary_expr(&mut self) -> Result<ExprWithPos> {

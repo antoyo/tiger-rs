@@ -1,0 +1,17 @@
+let type intfun = int -> int
+
+    function add(n: int) : intfun =
+        let var h := function(m: int) : int =
+            n + m
+        in
+            h
+        end
+
+    var addFive : intfun := add(5)
+    var test: int := addFive("")
+in
+    printi(addFive.test);
+    printi(addFive(""));
+    printi(addFive());
+    printi(addFive(10)(5))
+end

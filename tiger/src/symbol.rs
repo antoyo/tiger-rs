@@ -115,4 +115,11 @@ impl<T> Symbols<T> {
         *self.strings.next_symbol.borrow_mut() += 1;
         symbol
     }
+
+    pub fn unnamed(&mut self) -> Symbol {
+        let symbol = *self.strings.next_symbol.borrow();
+        self.strings.strings.borrow_mut().insert(symbol, String::new());
+        *self.strings.next_symbol.borrow_mut() += 1;
+        symbol
+    }
 }

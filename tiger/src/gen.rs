@@ -205,6 +205,15 @@ pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, arguments: Vec
     call(Name(label.clone()), arguments, parent_level, current_level, collectable_return_type)
 }
 
+pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp {
+    Call {
+        arguments,
+        collectable_return_type,
+        function_expr: Box::new(function_pointer),
+        return_label: Label::new(),
+    }
+}
+
 pub fn method_call<F: Clone + Frame + PartialEq>(index: usize, arguments: Vec<Exp>, parent_level: &Level<F>,
     current_level: &Level<F>, collectable_return_type: bool) -> Exp
 {

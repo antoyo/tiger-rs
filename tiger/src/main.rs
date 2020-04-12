@@ -61,6 +61,7 @@ mod temp;
 mod terminal;
 mod token;
 mod types;
+mod visitor;
 
 use std::env::args;
 use std::fs::{File, read_dir};
@@ -106,9 +107,6 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let file = BufReader::new(File::open(&filename)?);
         let file_symbol = symbols.symbol(&filename);
         let lexer = Lexer::new(file, file_symbol);
-        let main_symbol = symbols.symbol("main");
-        let self_symbol = symbols.symbol("self");
-        let object_symbol = symbols.symbol("Object");
         let mut parser = Parser::new(lexer, symbols);
         let ast = parser.parse()?;
         let mut rewriter = Rewriter::new(symbols);
@@ -116,8 +114,8 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let escape_env = find_escapes(&ast, Rc::clone(&strings));
         let mut env = Env::<X86_64>::new(&strings, escape_env);
         {
-            let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings), self_symbol, object_symbol);
-            let fragments = semantic_analyzer.analyze(main_symbol, ast)?;
+            let semantic_analyzer = SemanticAnalyzer::new(&mut env, symbols, Rc::clone(&strings));
+            let fragments = semantic_analyzer.analyze(ast)?;
 
             let mut asm_output_path = PathBuf::from(&filename);
             asm_output_path.set_extension("s");

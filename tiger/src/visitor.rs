@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2020 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -19,8 +19,6 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::rc::Rc;
-
 use ast::{
     Declaration,
     DeclarationWithPos,
@@ -30,117 +28,82 @@ use ast::{
     Operator,
 };
 use position::WithPos;
-use symbol::{Strings, Symbols};
+use symbol::SymbolWithPos;
 
-pub struct DepthEscape {
-    pub depth: u32,
-    pub escape: bool,
-}
-
-pub type EscapeEnv = Symbols<DepthEscape>;
-
-struct EscapeFinder {
-    env: EscapeEnv,
-}
-
-impl EscapeFinder {
-    fn new(strings: Rc<Strings>) -> Self {
-        Self {
-            env: Symbols::new(strings),
-        }
+pub trait Visitor {
+    fn visit_binary_op(&mut self, left: &ExprWithPos, right: &ExprWithPos) {
+        self.visit_exp(left);
+        self.visit_exp(right);
     }
 
-    fn visit_binary_op(&mut self, left: &ExprWithPos, right: &ExprWithPos, depth: u32) {
-        self.visit_exp(left, depth);
-        self.visit_exp(right, depth);
-    }
-
-    fn visit_dec(&mut self, declaration: &DeclarationWithPos, depth: u32) {
+    fn visit_dec(&mut self, declaration: &DeclarationWithPos) {
         match declaration.node {
             Declaration::ClassDeclaration { ref declarations, .. } => {
                 for declaration in declarations {
-                    self.visit_dec(declaration, depth + 1);
+                    self.visit_dec(declaration);
                 }
             },
             Declaration::Function(ref declarations) => {
-                for &WithPos { node: FuncDeclaration { ref params, ref body, .. }, .. } in declarations {
-                    for param in params {
-                        self.env.enter(param.node.name, DepthEscape {
-                            depth,
-                            escape: false,
-                        });
-                    }
-                    self.visit_exp(body, depth + 1);
+                for &WithPos { node: FuncDeclaration { ref body, .. }, .. } in declarations {
+                    self.visit_exp(body);
                 }
             },
             Declaration::Type(_) => (),
-            Declaration::VariableDeclaration { ref init, name, .. } => {
-                self.visit_exp(init, depth + 1); // TODO: do we really need to increment depth here?
-                self.env.enter(name, DepthEscape {
-                    depth,
-                    escape: false,
-                });
+            Declaration::VariableDeclaration { ref init, .. } => {
+                self.visit_exp(init);
             },
         }
     }
 
-    fn visit_exp(&mut self, expr: &ExprWithPos, depth: u32) {
+    fn visit_call(&mut self, function: &ExprWithPos, args: &[ExprWithPos]) {
+        self.visit_exp(function);
+        for arg in args {
+            self.visit_exp(arg);
+        }
+    }
+
+    fn visit_exp(&mut self, expr: &ExprWithPos) {
         match expr.node {
             Expr::Array { ref init, ref size, .. } => {
-                self.visit_exp(size, depth);
-                self.visit_exp(init, depth);
+                self.visit_exp(size);
+                self.visit_exp(init);
             },
             Expr::Assign { ref expr, ref var } => {
-                self.visit_exp(var, depth);
-                self.visit_exp(expr, depth);
+                self.visit_exp(var);
+                self.visit_exp(expr);
             },
             Expr::Break => {
             },
-            Expr::Closure { ref body, ref params, .. } => {
-                for param in params {
-                    self.env.enter(param.node.name, DepthEscape {
-                        depth,
-                        escape: false,
-                    });
-                }
-                self.visit_exp(body, depth + 1);
+            Expr::Closure { ref body, .. } => {
+                self.visit_exp(body);
             },
-            Expr::Call { ref args, .. } => {
-                for arg in args {
-                    self.visit_exp(arg, depth);
-                }
+            Expr::Call { ref args, ref function } => {
+                self.visit_call(function, args);
             },
-            Expr::ClosureParamField { ref ident, .. } | Expr::Field { ref ident, .. } | // TODO: does that make sense to look for the field here?
-                Expr::Variable(ref ident) => {
-                if let Some(ref mut var) = self.env.look_mut(ident.node) {
-                    if depth > var.depth {
-                        var.escape = true;
-                    }
-                }
-            },
+            Expr::ClosureParamField { .. } | Expr::Field { .. } => (),
             Expr::FunctionPointer { .. } => (),
             Expr::FunctionPointerCall { ref args, .. } => {
                 for arg in args {
-                    self.visit_exp(arg, depth);
+                    self.visit_exp(arg);
                 }
             },
             Expr::If { ref else_, ref test, ref then } => {
-                self.visit_exp(test, depth);
-                self.visit_exp(then, depth);
+                self.visit_exp(test);
+                self.visit_exp(then);
                 if let Some(ref else_) = *else_ {
-                    self.visit_exp(&else_, depth);
+                    self.visit_exp(&else_);
                 }
             },
             Expr::Int { .. } => (),
             Expr::Let { ref body, ref declarations } => {
                 for declaration in declarations {
-                    self.visit_dec(declaration, depth);
+                    self.visit_dec(declaration);
                 }
-                self.visit_exp(body, depth);
+                self.visit_exp(body);
             },
             Expr::MethodCall { ref args, .. } => {
                 for arg in args {
-                    self.visit_exp(arg, depth);
+                    self.visit_exp(arg);
                 }
             },
             Expr::New { .. } => (),
@@ -155,40 +118,38 @@ impl EscapeFinder {
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Ge, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Le, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Divide, .. }, ref right } =>
-                self.visit_binary_op(left, right, depth),
+                self.visit_binary_op(left, right),
             Expr::Oper { ref left, oper: WithPos { node: Operator::Equal, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Neq, .. }, ref right } => {
-                self.visit_exp(left, depth);
-                self.visit_exp(right, depth);
+                self.visit_exp(left);
+                self.visit_exp(right);
             },
             Expr::Record { ref fields, .. } => {
                 for field in fields {
-                    self.visit_exp(&field.node.expr, depth);
+                    self.visit_exp(&field.node.expr);
                 }
             },
             Expr::Sequence(ref exprs) => {
                 if let Some((last_expr, exprs)) = exprs.split_last() {
                     for expr in exprs {
-                        self.visit_exp(expr, depth);
+                        self.visit_exp(expr);
                     }
-                    self.visit_exp(last_expr, depth)
+                    self.visit_exp(last_expr)
                 }
             },
             Expr::Str { .. } => (),
             Expr::Subscript { ref expr, ref this } => {
-                self.visit_exp(this, depth);
-                self.visit_exp(expr, depth);
+                self.visit_exp(this);
+                self.visit_exp(expr);
             },
+            Expr::Variable(ref ident) => self.visit_var(ident),
             Expr::While { ref body, ref test } => {
-                self.visit_exp(test, depth);
-                self.visit_exp(body, depth);
+                self.visit_exp(test);
+                self.visit_exp(body);
             },
         }
     }
-}
 
-pub fn find_escapes(exp: &ExprWithPos, strings: Rc<Strings>) -> EscapeEnv {
-    let mut finder = EscapeFinder::new(strings);
-    finder.visit_exp(exp, 0);
-    finder.env
+    fn visit_var(&mut self, _ident: &SymbolWithPos) {
+    }
 }

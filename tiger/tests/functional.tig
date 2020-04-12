@@ -1,0 +1,43 @@
+let type intfun = int -> int
+
+    function add(n: int) : intfun =
+        let var h := function(m: int) : int =
+            n + m
+        in
+            h
+        end
+
+    var addFive : intfun := add(5)
+    var addSeven : intfun := add(7)
+    var twenty := addFive(15)
+    var twentyTwo := addSeven(15)
+
+    function twice(f: intfun) : intfun =
+        let var g := function(x: int) : int =
+            f(f(x))
+        in
+            g
+        end
+
+    var addTen: intfun := twice(addFive)
+    var seventeen := twice(add(5))(7)
+    var addTwentyFour := twice(twice(add(6)))
+
+    function getClosure() : intfun =
+        let var closure := function(m: int) : int =
+            m + 2
+        in
+            closure
+        end
+
+    var closure := function(m: int) : int =
+        m + 1
+in
+    printi(addFive(10));
+    printi(closure(10));
+    printi(getClosure()(12));
+    printi(twenty);
+    printi(twentyTwo);
+    printi(addTen(2));
+    printi(addTwentyFour(seventeen))
+end

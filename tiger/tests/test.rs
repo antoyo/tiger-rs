@@ -34,6 +34,7 @@ fn test_execution() {
         "conditions",
         "cycle",
         "escapes",
+        "functional",
         "functions",
         "gc",
         "hello",

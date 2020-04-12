@@ -173,7 +173,6 @@ impl Collector {
         self.allocated += size;
         unsafe {
             let ptr = self.heap.as_ptr().add(offset) as *mut usize;
-
             data_layout.write_repr(ptr);
             ptr as i64
         }

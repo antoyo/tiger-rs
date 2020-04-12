@@ -65,6 +65,10 @@ impl<R: Read> Lexer<R> {
         Ok(())
     }
 
+    fn arrow_or_minus(&mut self) -> Result<Token> {
+        self.two_char_token(vec![('>', Arrow)], Minus)
+    }
+
     fn colon_and_optional_equal(&mut self) -> Result<Token> {
         self.two_char_token(vec![('=', ColonEqual)], Colon)
     }
@@ -350,7 +354,7 @@ impl<R: Read> Lexer<R> {
                 b';' => self.simple_token(Semicolon),
                 b'*' => self.simple_token(Star),
                 b'+' => self.simple_token(Plus),
-                b'-' => self.simple_token(Minus),
+                b'-' => self.arrow_or_minus(),
                 b'{' => self.simple_token(OpenCurly),
                 b'}' => self.simple_token(CloseCurly),
                 b'(' => self.simple_token(OpenParen),

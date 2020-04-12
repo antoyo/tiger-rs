@@ -32,7 +32,7 @@ pub enum Declaration {
     Function(Vec<FuncDeclarationWithPos>),
     Type(Vec<TypeDecWithPos>),
     VariableDeclaration {
-        escape: bool,
+        escape: bool, // TODO: is this field actually used?
         init: ExprWithPos,
         name: Symbol,
         typ: Option<SymbolWithPos>,
@@ -55,11 +55,28 @@ pub enum Expr {
     Break,
     Call {
         args: Vec<ExprWithPos>,
-        function: Symbol,
+        function: Box<ExprWithPos>,
+    },
+    Closure {
+        body: Box<ExprWithPos>,
+        params: Vec<FieldWithPos>,
+        result: Option<SymbolWithPos>,
+    },
+    ClosureParamField {
+        ident: SymbolWithPos,
+        this: Box<ExprWithPos>,
     },
     Field {
         ident: SymbolWithPos,
         this: Box<ExprWithPos>,
+    },
+    FunctionPointer {
+        label: Symbol,
+    },
+    FunctionPointerCall {
+        args: Vec<ExprWithPos>,
+        closure_name: Symbol,
+        function: Box<ExprWithPos>,
     },
     If {
         else_: Option<Box<ExprWithPos>>,
@@ -157,6 +174,10 @@ pub type RecordFieldWithPos = WithPos<RecordField>;
 pub enum Ty {
     Array {
         ident: SymbolWithPos,
+    },
+    Function {
+        parameters: Vec<TyWithPos>,
+        return_type: Box<TyWithPos>,
     },
     Name {
         ident: SymbolWithPos,

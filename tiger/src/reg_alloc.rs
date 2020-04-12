@@ -516,8 +516,8 @@ mod tests {
         let escape_env = find_escapes(&ast, Rc::clone(&strings));
         let mut env = Env::<X86_64>::new(&strings, escape_env);
         {
-            let semantic_analyzer = SemanticAnalyzer::new(&mut env, Rc::clone(&strings), self_symbol, object_symbol);
-            let fragments = semantic_analyzer.analyze(main_symbol, ast).expect("semantic analyze");
+            let semantic_analyzer = SemanticAnalyzer::new(&mut env, &mut symbols, Rc::clone(&strings));
+            let fragments = semantic_analyzer.analyze(ast).expect("semantic analyze");
 
             for fragment in fragments {
                 match fragment {

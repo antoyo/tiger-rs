@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use escape::EscapeEnv;
+use escape::{DepthEscape, EscapeEnv};
 use frame::Frame;
 use gen;
 use gen::{Access, Level};
@@ -41,6 +41,9 @@ pub enum Entry<F: Clone + Frame> {
         level: Level<F>,
         parameters: Vec<Type>,
         result: Type,
+    },
+    RecordField {
+        record: Type,
     },
     Var {
         access: Access<F>,
@@ -96,6 +99,13 @@ impl<F: Clone + Frame> Env<F> {
     pub fn end_scope(&mut self) {
         self.type_env.end_scope();
         self.var_env.end_scope();
+    }
+
+    pub fn enter_escape(&mut self, symbol: Symbol, escape: bool) {
+        self.escape_env.enter(symbol, DepthEscape {
+            depth: 0, // This value is not used anymore.
+            escape,
+        });
     }
 
     pub fn enter_type(&mut self, symbol: Symbol, typ: Type) {
