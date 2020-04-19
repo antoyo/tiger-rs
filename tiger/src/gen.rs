@@ -88,7 +88,6 @@ impl<F: Frame> IR<F> {
 #[derive(Debug)]
 pub struct Level<F> {
     pub current: Rc<RefCell<F>>,
-    pub is_closure: bool,
     pub parent: Option<Box<Level<F>>>,
 }
 
@@ -96,7 +95,6 @@ impl<F> Clone for Level<F> {
     fn clone(&self) -> Self {
         Self {
             current: self.current.clone(),
-            is_closure: self.is_closure,
             parent: self.parent.clone(),
         }
     }
@@ -111,7 +109,6 @@ impl<F: PartialEq> PartialEq for Level<F> {
 pub fn outermost<F: Frame>() -> Level<F> {
     Level {
         current: Rc::new(RefCell::new(F::new(Label::new(), vec![]))),
-        is_closure: false,
         parent: None,
     }
 }
@@ -121,7 +118,6 @@ impl<F: Frame> Level<F> {
         formals.push(true); // for the static link.
         Level {
             current: Rc::new(RefCell::new(F::new(name, formals))),
-            is_closure: false,
             parent: Some(Box::new(parent.clone())),
         }
     }
@@ -177,20 +173,14 @@ pub fn field_access<F: Frame>(var: Exp, field_index: usize, field_type: FieldTyp
     }))
 }
 
-fn call(function: Exp, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp
+pub fn function_call(label: &Label, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp
 {
-    // TODO: remove this function.
     Call {
         arguments,
         collectable_return_type,
-        function_expr: Box::new(function),
+        function_expr: Box::new(Name(label.clone())),
         return_label: Label::new(),
     }
-}
-
-pub fn function_call(label: &Label, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp
-{
-    call(Name(label.clone()), arguments, collectable_return_type)
 }
 
 pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp {
@@ -214,7 +204,12 @@ pub fn method_call<F: Clone + Frame + PartialEq>(index: usize, arguments: Vec<Ex
         left: Box::new(vtable),
         right: Box::new(Const(F::WORD_SIZE * index as i64)),
     }));
-    call(function_ptr, arguments, collectable_return_type)
+    Call {
+        arguments,
+        collectable_return_type,
+        function_expr: Box::new(function_ptr),
+        return_label: Label::new(),
+    }
 }
 
 pub fn goto(label: Label) -> Exp {
@@ -421,20 +416,8 @@ pub fn relational_oper<F: Clone + Frame>(op: Operator, left: Exp, right: Exp, le
 }
 
 pub fn simple_var<F: Clone + Frame + PartialEq>(access: Access<F>, level: &Level<F>) -> Exp {
-    //let function_level = level;
     let frame = level.current.borrow();
-    let mut var = Exp::Temp(F::fp());
-    /*while function_level.current != var_level.current {
-        // TODO: remove this check.
-        if in_closure {
-            panic!("Trying to access static link from inside a closure");
-        }
-
-        var = frame.exp(function_level.current.borrow().formals().last().expect("static link").clone(), var);
-        function_level = function_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
-    }*/
-    var = frame.exp(access.1, var);
-    var
+    frame.exp(access.1, Exp::Temp(F::fp()))
 }
 
 pub fn string_equality<F: Frame>(oper: Operator, left: Exp, right: Exp) -> Exp {

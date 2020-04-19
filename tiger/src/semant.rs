@@ -118,7 +118,6 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
     escaping_vars: Vec<Vec<ClosureField>>,
     escaping_var_locations: Vec<i64>,
     gen: Gen<F>,
-    in_closure: bool, // TODO: remove.
     in_loop: bool,
     in_pure_fun: bool,
     methods_level: HashMap<(Symbol, Symbol), Level<F>>,
@@ -141,7 +140,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             escaping_vars: vec![],
             escaping_var_locations: vec![],
             gen: Gen::new(),
-            in_closure: false,
             in_loop: false,
             in_pure_fun: false,
             methods_level: HashMap::new(),
@@ -168,21 +166,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         );
         let result = Some(WithPos::new(self.env.type_symbol("int"), pos));
         let static_link_symbol = self.symbols.symbol(STATIC_LINK_VAR);
-        // TODO: Is creating the main static link useful?
         self.env.enter_escape(static_link_symbol, false);
         self.trans_dec(&WithPos::new(Declaration::Function(vec![
             WithPos::new(FuncDeclaration {
-                body: WithPos::dummy(Expr::Let {
-                    declarations: vec![
-                        /*WithPos::dummy(Declaration::VariableDeclaration {
-                            escape: true,
-                            init: WithPos::dummy(Expr::Nil),
-                            name: static_link_symbol,
-                            typ: None,
-                        }),*/
-                    ],
-                    body: Box::new(body),
-                }),
+                body,
                 name: WithPos::dummy(main_symbol),
                 params: vec![],
                 pure: false,
@@ -592,7 +579,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         parameters.push(param_type);
                         param_names.push(param.node.name);
                     }
-                    println!("Escaping_vars: {:?}", self.escaping_vars);
                     self.env.begin_scope();
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(level.formals().into_iter()) {
                         self.env.enter_var(name, Entry::Var { access, typ: param });
@@ -654,7 +640,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             typ: exp.ty.clone(),
                         });
                 }
-                println!("Escaping_vars: {:?}", self.escaping_vars);
                 let var = var_dec(&access, exp.exp);
                 self.env.enter_var(name, Entry::Var { access, typ: exp.ty });
                 Some(var)
@@ -869,19 +854,11 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 // NOTE: do not push a formal for the closure (environment), because Level::new()
                 // already push a formal for the static link that we can reuse since closures don't
                 // have static link.
-                let mut func_level = Level::new(level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
-                func_level.is_closure = true;
+                let func_level = Level::new(level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
                 let closure_level = func_level.formals().last().expect("closure access").0.clone();
 
                 let (mut env_fields, escaping_vars) = find_closure_environment(body, self.env, closure_level);
-                println!("***** Env fields {:?}", env_fields);
-                println!("***** Escaping vars: {:?}", escaping_vars);
                 let static_link_ident = self.symbols.symbol(STATIC_LINK_VAR);
-                /*let typ =
-                    match self.env.look_var(static_link_ident).cloned() { // TODO: remove this clone.
-                        Some(Entry::Var { ref typ, .. }) => typ.clone(),
-                        _ => unreachable!(),
-                    };*/
                 let (init, typ) = self.access_static_link(&escaping_vars, level, &func_level);
                 env_fields.insert(ClosureField {
                     ident: static_link_ident,
@@ -936,8 +913,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 {
                     let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
                     let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
-                    let old_in_closure = self.in_closure;
-                    self.in_closure = true;
 
                     // TODO: error when name already exist?
                     let mut param_names = vec![];
@@ -983,7 +958,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_var_locations);
                     self.env.end_scope();
 
-                    self.in_closure = old_in_closure;
                     self.escaping_var_locations = old_escaping_vars;
                     self.temp_map = old_temp_map;
                 }
@@ -1598,52 +1572,19 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.static_link_index += 1;
 
         if function_level.parent.as_deref() == Some(current_level) {
-            // TODO: update this comment.
-            // When calling a function defined in the current frame, simply pass the current frame
-            // pointer for the static link.
+            // When calling a function defined in the current frame, simply pass the current static link.
             match entry {
-                Some(Entry::Var { typ: Type::Record { ref types, .. }, .. }) => {
-                    if escaping_vars.len() > types.len() {
-                        // FIXME: this looks wrong because a static link can contain fewer
-                        // variables than its parent.
-                        unimplemented!();
-                        // New outside variables in used, need to create a
-                        // new record.
-                        let types = vec![];
-                        let data_layout = String::new();
-                        let data_layout = self.gen.string_literal(data_layout);
-                        // TODO: add the field for the static link.
-
-                        let record_type = Type::Record {
-                            data_layout,
-                            name: static_link_type_symbol,
-                            types,
-                            unique: Unique::new(),
+                Some(Entry::Var { typ: Type::Record { .. }, .. }) => {
+                    let typ =
+                        match entry {
+                            Some(Entry::Var { ref typ, .. }) => typ.clone(),
+                            _ => unreachable!(),
                         };
-                        self.env.enter_type(static_link_type_symbol, record_type.clone());
-
-                        let fields = vec![];
-                        (WithPos::dummy(Expr::Record {
-                            fields,
-                            typ: WithPos::dummy(static_link_type_symbol),
-                        }), Some(record_type))
-                    }
-                    else {
-                        self.logger.print("Else");
-                        let typ =
-                            match entry {
-                                Some(Entry::Var { ref typ, .. }) => typ.clone(),
-                                _ => unreachable!(),
-                            };
-                        // No new outside variables in used, reuse the
-                        // previous record.
-                        (WithPos::dummy(
-                            Expr::Variable(WithPos::dummy(static_link_symbol)),
-                        ), Some(typ))
-                    }
+                    (WithPos::dummy(
+                        Expr::Variable(WithPos::dummy(static_link_symbol)),
+                    ), Some(typ))
                 },
                 _ => {
-                    self.logger.print("_");
                     let mut data_layout = String::new();
                     let typ =
                         if let Some(Entry::Var { ref typ, .. }) = entry {
@@ -1724,8 +1665,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             }
                         }
                     }
-                    // TODO: since closures create a new level here, we have to skip that level to
-                    // do one less indirection.
                     match current_level.parent {
                         Some(ref parent) => current_level = parent,
                         None => unreachable!("variable not found in any scope"),
@@ -1745,15 +1684,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         else {
             BTreeSet::new()
         }
-        /*let mut escaping_vars = BTreeSet::new();
-        // FIXME: only fetch the parent level, not all the ancestors? because static
-        // links are linked together.
-        for vars in &self.escaping_vars {
-            for var in vars {
-                escaping_vars.insert(var.clone());
-            }
-        }
-        escaping_vars*/
     }
 
     fn enter_static_link_param(&mut self, level: &Level<F>, static_link: &BTreeSet<ClosureField>) {
@@ -1786,12 +1716,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
         let data_layout = self.gen.string_literal(data_layout);
 
-        // FIXME: since static links are not used for every variable access, and maybe
-        // also because a single variable can be in multiple static links, the writes
-        // to values in static links do not propagate in other functions.
-        // A value should be in only ony static link and every escaping variable access
-        // must go through the static link, even in the function where the variable is
-        // declared.
         self.env.enter_var(static_link_symbol, Entry::Var { access, typ: Type::StaticLink {
             data_layout,
             types,
@@ -1914,8 +1838,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.logger.print(&format!("Variable {:?}", self.strings.get(var_name.node)));
 
         let mut var = Expr::Variable(WithPos::dummy(static_link_symbol));
-        // TODO: update this comment.
-        // Add the offset of each parent frames (static link).
+        // Access the static link of each parent frame.
         while *function_level != var_level {
             self.logger.print("================================================== loop");
             var = Expr::Field {
@@ -2006,7 +1929,6 @@ impl<'a, F: Frame> EnvFinder<'a, F> {
 impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
     fn visit_call(&mut self, function: &ExprWithPos, args: &[ExprWithPos]) {
         self.visit_exp(function);
-        println!("*********************** Call {:?}", function);
         if let Expr::Variable(ref ident) = function.node {
             if let Some(&Entry::Fun { ref escaping_vars, .. }) = self.env.look_var(ident.node) {
                 for var in escaping_vars {
@@ -2029,7 +1951,6 @@ impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
     }
 
     fn visit_var(&mut self, ident: &SymbolWithPos) {
-        // TODO: panic if trying to access a var from static link?
         // TODO: support class field as well?
         if let Some(&Entry::Var { ref access, ref typ, }) = self.env.look_var(ident.node) {
             if self.closure_level.current != access.0.current {

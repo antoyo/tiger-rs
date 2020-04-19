@@ -6,13 +6,8 @@ let type intConsumer = int -> answer
     pure function getInt(done: intConsumer) =
         let pure function nextDigit(accum: int) =
             let pure function eatChar(dig: string) =
-                if isDigit(dig) then (
-                    print("accum: ");
-                    printi(accum);
-                    print("total: ");
-                    printi(accum * 10 + ord(dig) - ord("0"));
+                if isDigit(dig) then
                     nextDigit(accum * 10 + ord(dig) - ord("0"))
-                )
                 else
                     done(accum)
             in
@@ -41,12 +36,9 @@ let type intConsumer = int -> answer
             i * factorial(i - 1)
 
     pure function loop(i: int) =
-        if i > 12 then (
-            print("> 12\n");
+        if i > 12 then
             exit()
-        )
-        else (
-            print("<= 12\n");
+        else
             let pure function ask() =
                     getInt(loop)
                 pure function next() =
@@ -54,7 +46,6 @@ let type intConsumer = int -> answer
             in
                 putInt(factorial(i), next)
             end
-        )
 in
     getInt(loop)
 end
