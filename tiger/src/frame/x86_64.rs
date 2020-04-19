@@ -402,7 +402,7 @@ impl Frame for X86_64 {
 
         for instruction in instructions.iter_mut().rev() {
             match *instruction {
-                Instruction::Debug { .. } | Instruction::Label { .. } => (),
+                Instruction::Label { .. } => (),
                 Instruction::Call { ref mut source, .. } |
                     Instruction::Move { ref mut source, .. } |
                     Instruction::Operation { ref mut source, .. } =>

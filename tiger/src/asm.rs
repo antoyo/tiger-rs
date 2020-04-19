@@ -19,10 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::rc::Rc;
-
 use frame::Frame;
-use symbol::{Strings, Symbol};
 use temp::{Label, Temp};
 
 #[derive(Debug)]
@@ -32,10 +29,6 @@ pub enum Instruction {
         destination: Vec<Temp>,
         source: Vec<Temp>,
         return_label: Label,
-    },
-    Debug {
-        filename: Symbol,
-        line: i32,
     },
     Operation {
         assembly: String,
@@ -59,9 +52,8 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    pub fn to_string<F: Frame>(&self, strings: Rc<Strings>) -> String {
+    pub fn to_string<F: Frame>(&self) -> String {
         match *self {
-            Instruction::Debug { filename, line } => format!("%line {} {}", line, strings.get(filename).expect("filename")),
             Instruction::Label { ref assembly, .. } => assembly.clone(),
             Instruction::Call { ref assembly, ref destination, ref source, .. } |
                 Instruction::Move { ref assembly, ref destination, ref source, .. } |

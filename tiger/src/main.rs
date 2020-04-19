@@ -197,7 +197,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         let subroutine = frame.proc_entry_exit3(instructions);
                         writeln!(file, "{}", subroutine.prolog)?;
                         for instruction in subroutine.body {
-                            let instruction = instruction.to_string::<X86_64>(Rc::clone(&strings));
+                            let instruction = instruction.to_string::<X86_64>();
                             if !instruction.is_empty() {
                                 writeln!(file, "    {}", instruction)?;
                             }
