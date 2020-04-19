@@ -174,7 +174,6 @@ impl Collector {
         self.allocated += size;
         unsafe {
             let ptr = self.heap.as_ptr().add(offset) as *mut usize;
-            //println!("Allocation of size {} at {:?}", size, ptr);
             data_layout.write_repr(ptr);
             ptr as i64
         }
@@ -355,7 +354,6 @@ impl Collector {
     }
 
     fn grow_heap(&mut self) {
-        println!("****************************************************************************************************Grow");
         let old_heap = self.heap.as_ptr() as usize;
 
         let addresses = stack_return_addresses();

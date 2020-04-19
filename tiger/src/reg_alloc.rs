@@ -547,6 +547,10 @@ mod tests {
                         let instructions = generator.get_result();
                         let instructions = frame.proc_entry_exit2(instructions, escaping_vars);
 
+                        for (i, instruction) in instructions.iter().enumerate() {
+                            println!("{}. {}", i, instruction.to_string::<X86_64>());
+                        }
+
                         let mut allocator = Allocator::new::<X86_64>(instructions, temp_map);
                         let IntervalAnalysis { intervals, precolored_intervals, .. } = allocator.live_interval_analysis::<X86_64>();
 
@@ -582,12 +586,12 @@ mod tests {
         expected_precolored_intervals.insert("tests/hello.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(66, vec![(20, 21), (83, usize::MAX)]);
-        intervals.insert(65, vec![(21, 23), (83, usize::MAX)]);
+        intervals.insert(66, vec![(26, 27), (65, usize::MAX)]);
+        intervals.insert(65, vec![(24, 25), (65, usize::MAX)]);
         expected_intervals.insert("tests/integers.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(106, vec![(19, 20), (23, 26), (203, usize::MAX)]);
+        intervals.insert(85, vec![(19, 20), (23, 26), (203, usize::MAX)]);
         expected_intervals.insert("tests/conditions.tig", intervals);
         let mut intervals = HashMap::new();
         intervals.insert(2, vec![(0, usize::MAX)]);

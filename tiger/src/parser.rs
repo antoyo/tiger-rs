@@ -228,6 +228,7 @@ impl<'a, R: Read> Parser<'a, R> {
     }
 
     fn class_dec(&mut self) -> Result<DeclarationWithPos> {
+        unreachable!("Remove class");
         let pos = eat!(self, Class);
         let name;
         let ident_pos = eat!(self, Ident, name);

@@ -29,7 +29,6 @@ fn test_execution() {
     let files = [
         "array",
         "array_assignment",
-        "class",
         "comments",
         "conditions",
         "cycle",
@@ -46,9 +45,8 @@ fn test_execution() {
         "integers",
         "lib",
         "loops",
-        "merge",
         "nested",
-        "prettyprint",
+        "pure",
         "pureTree",
         "queens",
         "record",
