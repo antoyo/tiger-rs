@@ -8,6 +8,9 @@ let type tree = {key: string, left: tree, right: tree}
                     (for i := 0 to n
                         do write(" ");
                         output := concat(output, s);
+                        print(">>>>>>>>\n");
+                        print(output);
+                        print("<<<<<<<<\n");
                         write("\n"))
                 in
                     if t = nil then
@@ -20,6 +23,9 @@ let type tree = {key: string, left: tree, right: tree}
                 end
         in
             show(0, tree);
+            printi(1);
+            print(output);
+            printi(2);
             output
         end
 in

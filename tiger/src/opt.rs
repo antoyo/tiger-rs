@@ -48,6 +48,5 @@ impl<'a, F: Frame> Opt<'a, F> {
     }
 
     fn inline(&mut self, _func_name: &str) {
-        // TODO: do closure conversion (for static links to work with inlining).
     }
 }

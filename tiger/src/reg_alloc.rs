@@ -241,7 +241,7 @@ impl Allocator {
     fn replace_allocation(&mut self) {
         for instruction in &mut self.instructions {
             match *instruction {
-                Instruction::Label { .. } => (),
+                Instruction::Debug { .. } | Instruction::Label { .. } => (),
                 Instruction::Call { ref mut destination, ref mut source, .. } |
                     Instruction::Move { ref mut destination, ref mut source, .. } |
                     Instruction::Operation { ref mut destination, ref mut source, .. } =>
@@ -318,7 +318,7 @@ impl Allocator {
                             }
                         }
                     },
-                    Instruction::Label { .. } => (),
+                    Instruction::Debug { .. } | Instruction::Label { .. } => (),
             }
         }
 
@@ -365,7 +365,7 @@ impl Allocator {
                             }
                         }
                     },
-                    Instruction::Label { .. } => gen.emit(instruction),
+                    Instruction::Debug { .. } | Instruction::Label { .. } => gen.emit(instruction),
             }
         }
 

@@ -1,18 +1,22 @@
-/* FIXME: this does not work because closures were implemented without static links. */
 let type intConsumer = int -> answer
 
     pure function isDigit(s: string) : int =
         ord(s) >= ord("0") & ord(s) <= ord("9")
 
     pure function getInt(done: intConsumer) =
-        let var nextDigit := pure function(accum: int) =
-            let var eatChar := pure function(dig: string) =
-                if isDigit(dig) then
-                    nextDigit(accum * 10 + ord(dig))
+        let pure function nextDigit(accum: int) =
+            let pure function eatChar(dig: string) =
+                if isDigit(dig) then (
+                    print("accum: ");
+                    printi(accum);
+                    print("total: ");
+                    printi(accum * 10 + ord(dig) - ord("0"));
+                    nextDigit(accum * 10 + ord(dig) - ord("0"))
+                )
                 else
                     done(accum)
             in
-                getcharP(eatChar)
+                getcharP(pure function(char: string) = eatChar(char))
             end
         in
             nextDigit(0)
@@ -24,10 +28,10 @@ let type intConsumer = int -> answer
         else
             let var rest := i / 10
                 var dig := i - rest * 10
-                var doDigit := pure function() =
-                    printP(chr(dig), c)
+                pure function doDigit() =
+                    printP(chr(dig + ord("0")), c)
             in
-                putInt(rest, doDigit)
+                putInt(rest, pure function() = doDigit())
             end
 
     pure function factorial(i: int) : int =
@@ -37,14 +41,20 @@ let type intConsumer = int -> answer
             i * factorial(i - 1)
 
     pure function loop(i: int) =
-        if i > 12 then
+        if i > 12 then (
+            print("> 12\n");
             exit()
-        else
-            let pure function next() =
-                getInt(loop)
+        )
+        else (
+            print("<= 12\n");
+            let pure function ask() =
+                    getInt(loop)
+                pure function next() =
+                    printP("\n", ask)
             in
                 putInt(factorial(i), next)
             end
+        )
 in
     getInt(loop)
 end

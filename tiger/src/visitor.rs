@@ -28,7 +28,7 @@ use ast::{
     Operator,
 };
 use position::WithPos;
-use symbol::SymbolWithPos;
+use symbol::{Symbol, SymbolWithPos};
 
 pub trait Visitor {
     fn visit_binary_op(&mut self, left: &ExprWithPos, right: &ExprWithPos) {
@@ -45,14 +45,22 @@ pub trait Visitor {
             },
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref body, .. }, .. } in declarations {
-                    self.visit_exp(body);
+                    self.visit_func_dec(body);
                 }
             },
             Declaration::Type(_) => (),
-            Declaration::VariableDeclaration { ref init, .. } => {
-                self.visit_exp(init);
+            Declaration::VariableDeclaration { ref init, name, .. } => {
+                self.visit_var_dec(name, init);
             },
         }
+    }
+
+    fn visit_func_dec(&mut self, body: &ExprWithPos) {
+        self.visit_exp(body);
+    }
+
+    fn visit_var_dec(&mut self, _name: Symbol, init: &ExprWithPos) {
+        self.visit_exp(init);
     }
 
     fn visit_call(&mut self, function: &ExprWithPos, args: &[ExprWithPos]) {
@@ -77,11 +85,15 @@ pub trait Visitor {
             Expr::Call { ref args, ref function } => {
                 self.visit_call(function, args);
             },
+            Expr::CallWithStaticLink { ref args, ref function } => {
+                self.visit_call(function, args);
+            },
             Expr::Closure { ref body, .. } => {
                 self.visit_exp(body);
             },
             Expr::ClosureParamField { ref this, .. } =>
                 self.visit_exp(this),
+            Expr::DirectVariable(ref ident) => self.visit_var(ident),
             Expr::Field { ref this, .. } =>
                 self.visit_exp(this),
             Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),

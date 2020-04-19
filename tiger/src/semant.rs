@@ -19,7 +19,6 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::mem;
@@ -40,7 +39,7 @@ use ast::{
     TypeDecWithPos,
     TyWithPos,
 };
-use env::{Env, Entry};
+use env::{ClosureField, Env, Entry};
 use error::{Error, Result};
 use frame::{Frame, Memory};
 use gen;
@@ -69,6 +68,7 @@ use gen::{
     while_loop,
 };
 use ir::{Exp, Statement, _Statement};
+use log::Logger;
 use position::{Pos, WithPos};
 use self::AddError::*;
 use symbol::{Strings, Symbol, Symbols, SymbolWithPos};
@@ -84,6 +84,7 @@ use visitor::Visitor;
 
 const CLOSURE_PARAM: &str = "__closure_param";
 const CLOSURE_FIELD: &str = "function_pointer";
+const STATIC_LINK_VAR: &str = "__tiger_static_link";
 // Offset 2, because offset 0 is the object type (class) and offset 1 is the data layout.
 pub const VTABLE_OFFSET: usize = 2;
 
@@ -114,16 +115,20 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
     closure_index: usize,
     env: &'a mut Env<F>,
     errors: Vec<Error>,
-    escaping_vars: Vec<i64>,
+    escaping_vars: Vec<Vec<ClosureField>>,
+    escaping_var_locations: Vec<i64>,
     gen: Gen<F>,
-    in_closure: bool,
+    in_closure: bool, // TODO: remove.
     in_loop: bool,
     in_pure_fun: bool,
     methods_level: HashMap<(Symbol, Symbol), Level<F>>,
     self_symbol: Symbol,
+    static_link_index: usize,
     strings: Rc<Strings>,
     symbols: &'a mut Symbols<()>,
     temp_map: TempMap,
+
+    logger: Logger,
 }
 
 impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
@@ -134,15 +139,19 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             env,
             errors: vec![],
             escaping_vars: vec![],
+            escaping_var_locations: vec![],
             gen: Gen::new(),
             in_closure: false,
             in_loop: false,
             in_pure_fun: false,
             methods_level: HashMap::new(),
             self_symbol,
+            static_link_index: 0,
             symbols,
             strings,
             temp_map: TempMap::new(),
+
+            logger: Logger::new(),
         }
     }
 
@@ -158,9 +167,22 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             pos,
         );
         let result = Some(WithPos::new(self.env.type_symbol("int"), pos));
+        let static_link_symbol = self.symbols.symbol(STATIC_LINK_VAR);
+        // TODO: Is creating the main static link useful?
+        self.env.enter_escape(static_link_symbol, false);
         self.trans_dec(&WithPos::new(Declaration::Function(vec![
             WithPos::new(FuncDeclaration {
-                body,
+                body: WithPos::dummy(Expr::Let {
+                    declarations: vec![
+                        /*WithPos::dummy(Declaration::VariableDeclaration {
+                            escape: true,
+                            init: WithPos::dummy(Expr::Nil),
+                            name: static_link_symbol,
+                            typ: None,
+                        }),*/
+                    ],
+                    body: Box::new(body),
+                }),
                 name: WithPos::dummy(main_symbol),
                 params: vec![],
                 pure: false,
@@ -332,7 +354,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 };
                 self.env.enter_type(name.node, empty_class_type);
 
-                let old_escaping_vars = mem::take(&mut self.escaping_vars);
+                let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
 
                 let mut pending_methods = vec![];
@@ -466,8 +488,8 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let exp = self.trans_exp(body, &method.level, done_label.clone(), true);
                     self.check_types(&method.return_type, &exp.ty, body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::take(&mut self.escaping_vars);
-                    self.gen.proc_entry_exit(&method.level, exp.exp, current_temp_map, escaping_vars);
+                    let escaping_var_locations = mem::take(&mut self.escaping_var_locations);
+                    self.gen.proc_entry_exit(&method.level, exp.exp, current_temp_map, escaping_var_locations);
                     self.env.end_scope();
                 }
 
@@ -476,21 +498,23 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     .collect();
                 self.gen.vtable(vtable_name, method_labels);
 
-                self.escaping_vars = old_escaping_vars;
+                self.escaping_var_locations = old_escaping_vars;
                 self.temp_map = old_temp_map;
 
                 None
             },
             Declaration::Function(ref declarations) => {
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                let old_escaping_vars = mem::take(&mut self.escaping_vars);
+                let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
                 let mut levels = vec![];
-                for &WithPos { node: FuncDeclaration { ref body, ref name, ref params, pure, ref result, .. }, .. } in declarations {
-                    let func_name = name.node;
+                let mut static_links = vec![];
+                for &WithPos { node: FuncDeclaration { ref name, ref params, pure, ref result, .. }, .. } in declarations {
+                    let func_symbol = name.node;
+                    let func_name = self.strings.get(func_symbol).expect("string get");
                     let formals = params.iter()
                         .map(|param| self.env.look_escape(param.node.name))
                         .collect();
-                    let level = Level::new(parent_level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
+                    let level = Level::new(parent_level, Label::with_name(&func_name), formals);
                     let result_type =
                         if let Some(ref result) = *result {
                             self.get_type(result, AddError)
@@ -514,13 +538,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     }
                     levels.push(level.clone());
 
-                    let env_fields = find_closure_environment(body, self.env, level.clone());
+                    let escaping_vars = self.find_escaping_vars();
+                    static_links.push(escaping_vars.clone());
 
-                    self.env.enter_var(func_name, Entry::Fun {
-                        access_outside_vars: !env_fields.is_empty(),
+                    self.env.enter_var(func_symbol, Entry::Fun {
                         external: false,
-                        label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
+                        label: Label::with_name(&func_name),
                         level,
+                        escaping_vars,
                         parameters,
                         pure,
                         result: result_type.clone(),
@@ -528,9 +553,19 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
 
                 let old_in_pure_fun = self.in_pure_fun;
-                for (&WithPos { node: FuncDeclaration { ref params, ref body, pure, ref result, .. }, .. }, level) in
-                    declarations.iter().zip(&levels)
+                for ((&WithPos { node: FuncDeclaration { ref name, ref params, ref body, pure, ref result, .. }, .. }, level), static_link) in
+                    declarations.iter().zip(&levels).zip(&static_links)
                 {
+                    let func_name = self.strings.get(name.node).expect("string get");
+                    self.logger.print(&format!("Function {}", func_name));
+                    self.logger.print("{");
+                    self.logger.begin_scope();
+
+                    self.logger.print("Escaping:");
+                    for field in static_link {
+                        self.logger.print(&format!("{:?}", self.strings.get(field.ident)));
+                    }
+
                     self.in_pure_fun = pure;
                     let result_type =
                         if let Some(ref result) = *result {
@@ -544,23 +579,39 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         };
                     let mut param_names = vec![];
                     let mut parameters = vec![];
+                    self.escaping_vars.push(vec![]);
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, DontAddError));
+                        let param_type = self.get_type(&param.node.typ, DontAddError);
+                        if self.env.look_escape(param.node.name) {
+                            self.escaping_vars.last_mut().expect("scope")
+                                .push(ClosureField {
+                                    ident: param.node.name,
+                                    typ: param_type.clone(),
+                                });
+                        }
+                        parameters.push(param_type);
                         param_names.push(param.node.name);
                     }
+                    println!("Escaping_vars: {:?}", self.escaping_vars);
                     self.env.begin_scope();
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(level.formals().into_iter()) {
                         self.env.enter_var(name, Entry::Var { access, typ: param });
                     }
+
+                    self.enter_static_link_param(level, static_link);
+
                     let exp = self.trans_exp(body, level, done_label.clone(), true);
                     self.check_types(&result_type, &exp.ty, body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::take(&mut self.escaping_vars);
-                    self.gen.proc_entry_exit(level, exp.exp, current_temp_map, escaping_vars);
+                    let escaping_var_locations = mem::take(&mut self.escaping_var_locations);
+                    self.gen.proc_entry_exit(level, exp.exp, current_temp_map, escaping_var_locations);
                     self.env.end_scope();
+                    self.logger.end_scope();
+                    self.logger.print(&format!("}} # Function {}", func_name));
+                    self.escaping_vars.pop();
                 }
                 self.in_pure_fun = old_in_pure_fun;
-                self.escaping_vars = old_escaping_vars;
+                self.escaping_var_locations = old_escaping_vars;
                 self.temp_map = old_temp_map;
                 None
             },
@@ -583,7 +634,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let access = gen::alloc_local(parent_level, escape || is_collectable); // TODO: check if this is necessary.
                 if escape {
                     if let Some(stack_var) = access.1.as_stack() {
-                        self.escaping_vars.push(stack_var);
+                        self.escaping_var_locations.push(stack_var);
                     }
                 }
                 if is_collectable {
@@ -596,6 +647,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.add_error(Error::RecordType { pos: declaration.pos });
                     return None;
                 }
+                if escape {
+                    self.escaping_vars.last_mut().expect("scope")
+                        .push(ClosureField {
+                            ident: name,
+                            typ: exp.ty.clone(),
+                        });
+                }
+                println!("Escaping_vars: {:?}", self.escaping_vars);
                 let var = var_dec(&access, exp.exp);
                 self.env.enter_var(name, Entry::Var { access, typ: exp.ty });
                 Some(var)
@@ -616,7 +675,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         let access = gen::alloc_local(level, true);
                         self.temp_map.insert::<F>(&access.1);
                         if let Some(stack_var) = access.1.as_stack() {
-                            self.escaping_vars.push(stack_var);
+                            self.escaping_var_locations.push(stack_var);
                         }
                         Some(access)
                     }
@@ -637,7 +696,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 self.check_types(inner_type, &init_expr.ty, init.pos);
                 let is_pointer = self.array_contains_pointer(&ty);
                 let is_pointer = num(is_pointer as i64);
-                let exp = init_array::<F>(var, size_expr.exp, is_pointer, init_expr.exp, level, self.in_closure);
+                let exp = init_array::<F>(var, size_expr.exp, is_pointer, init_expr.exp, level);
                 ExpTy {
                     exp,
                     ty,
@@ -680,14 +739,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 match function.node {
                     Expr::Variable(ref func) => {
                         match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
-                            Some(Entry::Fun { external, ref label, ref parameters, ref result, level: ref current_level, pure, .. }) => {
-                                if self.in_pure_fun && !pure {
+                            Some(Entry::Fun { external, ref parameters, level: ref function_level, ref escaping_vars, .. }) => {
+                                // TODO: uncomment this code.
+                                /*if self.in_pure_fun && !pure {
                                     self.add_error(Error::CannotCallImpureFun {
                                         pos,
                                     });
-                                }
+                                }*/
 
-                                let mut expr_args = vec![];
                                 if parameters.len() != args.len() {
                                     self.add_error(Error::InvalidNumberOfParams {
                                         actual: args.len(),
@@ -695,29 +754,107 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                         pos,
                                     });
                                 }
-                                for (arg, param) in args.iter().zip(parameters) {
-                                    let exp = self.trans_exp(arg, level, done_label.clone(), true);
-                                    self.check_types(param, &exp.ty, arg.pos);
-                                    expr_args.push(exp.exp);
-                                }
-                                let collectable_return_type = type_is_collectable(result);
-                                let exp =
-                                    if external {
-                                        F::external_call(&label.to_name(), expr_args, collectable_return_type)
+
+                                let mut args = args.clone();
+                                let static_link_symbol = self.symbols.symbol("__callee_static_link");
+                                let mut declarations = vec![];
+                                if !external {
+                                    self.logger.print(&format!("Calling {:?}", self.strings.get(func.node)));
+                                    self.logger.print("*** Access static link:");
+                                    for field in escaping_vars {
+                                        self.logger.print(&format!("Name: {:?}", self.strings.get(field.ident)));
                                     }
-                                    else {
-                                        function_call(label, expr_args, level, current_level, collectable_return_type, self.in_closure)
-                                    };
-                                ExpTy {
-                                    exp,
-                                    ty: self.actual_ty(result),
+                                    self.logger.print("*** End access static link:");
+                                    let (init, _) = self.access_static_link(escaping_vars, level, function_level);
+                                    args.push(WithPos::dummy(Expr::Variable(WithPos::dummy(static_link_symbol))));
+                                    self.env.enter_escape(static_link_symbol, false);
+                                    declarations.push(
+                                        WithPos::new(Declaration::VariableDeclaration {
+                                            escape: true,
+                                            name: static_link_symbol,
+                                            init,
+                                            typ: None,
+                                        }, pos)
+                                    );
                                 }
+                                self.trans_exp(&WithPos::new(Expr::Let {
+                                    declarations,
+                                    body: Box::new(WithPos::new(Expr::CallWithStaticLink {
+                                        args,
+                                        function: function.clone(),
+                                    }, pos)),
+                                }, pos),
+                                level, done_label, true)
                             },
                             Some(_) => self.closure_call(function, args, level, done_label),
                             None => self.undefined_function(func.node, func.pos),
                         }
                     },
                     _ => self.closure_call(function, args, level, done_label),
+                }
+            },
+            Expr::CallWithStaticLink { ref args, ref function } => {
+                match function.node {
+                    Expr::Variable(ref func) => {
+                        let entry = self.env.look_var(func.node).cloned(); // TODO: remove this clone.
+                        if entry.is_none() {
+                            return self.undefined_function(func.node, func.pos);
+                        }
+                        if let Some(entry@Entry::Fun { .. }) = entry {
+                            match entry {
+                                Entry::Fun { ref escaping_vars, external, ref label, ref parameters, ref result, .. } => {
+                                    let mut expr_args = vec![];
+                                    for (arg, param) in args.iter().zip(parameters) {
+                                        let exp = self.trans_exp(arg, level, done_label.clone(), true);
+                                        self.check_types(param, &exp.ty, arg.pos);
+                                        expr_args.push(exp.exp);
+                                    }
+
+                                    let collectable_return_type = type_is_collectable(result);
+                                    let exp =
+                                        if external {
+                                            F::external_call(&label.to_name(), expr_args, collectable_return_type)
+                                        }
+                                        else {
+                                            let static_link = args.last().expect("static link");
+                                            let exp = self.trans_exp(static_link, level, done_label.clone(), true);
+
+                                            let static_link_types =
+                                                match exp.ty {
+                                                    Type::Record { ref types, .. } | Type::StaticLink { ref types, .. } => types,
+                                                    _ => unreachable!(),
+                                                };
+                                            for &(ident, _) in static_link_types {
+                                                self.logger.print(&format!("Static link contains: {:?}", self.strings.get(ident)));
+                                            }
+                                            for var in escaping_vars {
+                                                let mut found = false;
+                                                for &(ident, _) in static_link_types {
+                                                    if ident == var.ident {
+                                                        found = true;
+                                                    }
+                                                }
+                                                if !found {
+                                                    panic!("Missing var {:?} in static link", self.strings.get(var.ident));
+                                                }
+                                            }
+
+                                            expr_args.push(exp.exp);
+                                            function_call(label, expr_args, collectable_return_type)
+                                        };
+                                    ExpTy {
+                                        exp,
+                                        ty: self.actual_ty(result),
+                                    }
+                                },
+                                _ => unreachable!(),
+                            }
+                        }
+                        else {
+                            unreachable!();
+                        }
+                    },
+                    _ => unreachable!(),
                 }
             },
             Expr::Closure { ref body, ref params, pure, ref result } => {
@@ -732,10 +869,24 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 // NOTE: do not push a formal for the closure (environment), because Level::new()
                 // already push a formal for the static link that we can reuse since closures don't
                 // have static link.
-                let func_level = Level::new(level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
+                let mut func_level = Level::new(level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
+                func_level.is_closure = true;
                 let closure_level = func_level.formals().last().expect("closure access").0.clone();
 
-                let env_fields = find_closure_environment(body, self.env, closure_level);
+                let (mut env_fields, escaping_vars) = find_closure_environment(body, self.env, closure_level);
+                println!("***** Env fields {:?}", env_fields);
+                println!("***** Escaping vars: {:?}", escaping_vars);
+                let static_link_ident = self.symbols.symbol(STATIC_LINK_VAR);
+                /*let typ =
+                    match self.env.look_var(static_link_ident).cloned() { // TODO: remove this clone.
+                        Some(Entry::Var { ref typ, .. }) => typ.clone(),
+                        _ => unreachable!(),
+                    };*/
+                let (init, typ) = self.access_static_link(&escaping_vars, level, &func_level);
+                env_fields.insert(ClosureField {
+                    ident: static_link_ident,
+                    typ: typ.expect("static link"),
+                });
 
                 let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
 
@@ -784,7 +935,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 {
                     let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let old_escaping_vars = mem::take(&mut self.escaping_vars);
+                    let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
                     let old_in_closure = self.in_closure;
                     self.in_closure = true;
 
@@ -799,13 +950,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             self.duplicate_param(param);
                         }
                     }
-                    param_names.push(self.symbols.symbol(CLOSURE_PARAM));
+                    let closure_param_symbol = self.symbols.symbol(CLOSURE_PARAM);
+                    param_names.push(closure_param_symbol);
                     parameters.push(record_type.clone());
                     self.env.enter_var(func_name, Entry::Fun {
-                        access_outside_vars: false, // False because the outside variables are in the closure environment.
                         external: false,
                         label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
                         level: func_level.clone(),
+                        escaping_vars: BTreeSet::new(),
                         parameters: parameters.clone(),
                         pure: false,
                         result: result_type.clone(),
@@ -815,21 +967,24 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     for field in &env_fields {
                         self.env.enter_var(field.ident, Entry::RecordField { record: record_type.clone() });
                     }
+
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(func_level.formals().into_iter()) {
                         self.env.enter_var(name, Entry::Var { access, typ: param });
                     }
+                    self.env.enter_escape(closure_param_symbol, false);
+
                     // TODO: forbid declaring normal functions in closure (because they could
                     // access variables from outside the closure)?
                     // Or could we just put the variables in the closure?
                     let exp = self.trans_exp(&function.body, &func_level, done_label.clone(), true);
                     self.check_types(&result_type, &exp.ty, function.body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::take(&mut self.escaping_vars);
-                    self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_vars);
+                    let escaping_var_locations = mem::take(&mut self.escaping_var_locations);
+                    self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_var_locations);
                     self.env.end_scope();
 
                     self.in_closure = old_in_closure;
-                    self.escaping_vars = old_escaping_vars;
+                    self.escaping_var_locations = old_escaping_vars;
                     self.temp_map = old_temp_map;
                 }
 
@@ -860,9 +1015,20 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     }, pos));
                 }
 
-                let closure = self.trans_exp(&WithPos::new(Expr::Record {
-                    fields,
-                    typ: WithPos::new(closure_symbol, pos),
+                let declarations = vec![
+                    WithPos::new(Declaration::VariableDeclaration {
+                        escape: true,
+                        name: static_link_ident,
+                        init,
+                        typ: None,
+                    }, pos)
+                ];
+                let closure = self.trans_exp(&WithPos::new(Expr::Let {
+                    declarations,
+                    body: Box::new(WithPos::new(Expr::Record {
+                        fields,
+                        typ: WithPos::new(closure_symbol, pos),
+                    }, pos)),
                 }, pos), level, done_label, true);
                 ExpTy {
                     exp: closure.exp,
@@ -884,7 +1050,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 EXP_TYPE_ERROR
             },
             Expr::Field { ref ident, ref this } => {
-                let var = self.trans_exp(this, level, done_label, true);
+                let var = self.trans_exp(this, level, done_label.clone(), true);
                 match var.ty {
                     Type::Class { name: class_type, ref fields, .. } => {
                         for (index, class_field) in fields.iter().enumerate() {
@@ -909,6 +1075,27 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         self.unexpected_field(ident, ident.pos, record_type)
                     },
                     Type::Error => EXP_TYPE_ERROR,
+                    Type::StaticLink { ref types, .. } => {
+                        self.logger.print("Access field of static link");
+                        for &(symbol, ref typ) in types {
+                            self.logger.print(&format!("{:?}: {:?}", self.strings.get(symbol), typ));
+                        }
+                        if types.is_empty() {
+                            // Main function has an empty static link.
+                            return self.trans_exp(&WithPos::dummy(Expr::Nil), level, done_label.clone(), true);
+                        }
+                        for (index, &(name, ref typ)) in types.iter().enumerate() {
+                            self.logger.print(&format!("{:?} ({})", self.strings.get(name), name));
+                            if name == ident.node {
+                                self.logger.print(&format!("Was {:?} at {}", self.strings.get(name), index));
+                                return ExpTy {
+                                    exp: field_access::<F>(var.exp, index, FieldType::Record),
+                                    ty: typ.clone(),
+                                };
+                            }
+                        }
+                        unreachable!();
+                    },
                     typ => {
                         self.add_error(Error::NotARecordOrClass {
                             pos: this.pos,
@@ -1037,8 +1224,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         }
                         let result = &method_type.return_type;
                         let collectable_return_type = type_is_collectable(result);
-                        let current_level = self.methods_level.get(&(class_method.class_name, method.node)).expect("level");
-                        let exp = method_call(index, expr_args, level, current_level, collectable_return_type, self.in_closure);
+                        let exp = method_call::<F>(index, expr_args, collectable_return_type);
                         return ExpTy {
                             exp,
                             ty: self.actual_ty(result),
@@ -1070,13 +1256,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let access = gen::alloc_local(level, true);
                 self.temp_map.insert::<F>(&access.1);
                 if let Some(stack_var) = access.1.as_stack() {
-                    self.escaping_vars.push(stack_var);
+                    self.escaping_var_locations.push(stack_var);
                 }
                 let mut field_exprs = vec![];
                 for field in &fields {
                     field_exprs.push(self.trans_exp(&field.value, level, done_label.clone(), false).exp);
                 }
-                let exp = class_create::<F>(access, data_layout, field_exprs, vtable_name, self.in_closure);
+                let exp = class_create::<F>(access, data_layout, field_exprs, vtable_name);
                 ExpTy {
                     exp,
                     ty: class,
@@ -1214,11 +1400,24 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     },
                 }
             },
+            Expr::DirectVariable(ref ident) => {
+                match self.env.look_var(ident.node).cloned() { // TODO: remove this clone.
+                    Some(Entry::Var { ref access, ref typ, }) => {
+                        let exp = simple_var(access.clone(), level);
+                        ExpTy {
+                            exp,
+                            ty: self.actual_ty(typ),
+                        }
+                    },
+                    _ => unreachable!("{:?}", self.strings.get(ident.node)),
+                }
+            },
             Expr::Variable(ref ident) => {
                 match self.env.look_var(ident.node).cloned() { // TODO: remove this clone.
                     Some(Entry::Var { ref access, ref typ, }) => {
+                        let exp = self.variable_access(ident, access.clone(), level, done_label.clone());
                         ExpTy {
-                            exp: simple_var(access.clone(), level, self.in_closure),
+                            exp,
                             ty: self.actual_ty(typ),
                         }
                     },
@@ -1240,15 +1439,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         }
                         unreachable!();
                     },
-                    Some(Entry::Fun { access_outside_vars, ref label, ref parameters, ref result, .. }) => {
-                        // Create an empty closure for the function.
-                        if access_outside_vars {
-                            self.add_error(Error::CannotAccessOutsideVars {
-                                pos,
-                            });
-                            return EXP_TYPE_ERROR;
-                        }
-
+                    Some(Entry::Fun { ref label, ref parameters, ref result, .. }) => {
                         let mut data_layout = String::new();
                         data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
                         let data_layout = self.gen.string_literal(data_layout);
@@ -1389,6 +1580,224 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
+    fn access_static_link(&mut self, escaping_vars: &BTreeSet<ClosureField>, current_level: &Level<F>, function_level: &Level<F>) -> (ExprWithPos, Option<Type>) {
+        let static_link_symbol = self.symbols.symbol(STATIC_LINK_VAR);
+        let entry = self.env.look_var(static_link_symbol).cloned();
+        if *function_level == *current_level {
+            let typ =
+                match entry {
+                    Some(Entry::Var { ref typ, .. }) => typ.clone(),
+                    _ => unreachable!(),
+                };
+            // For a recursive call, we simply pass the current static link, which represents the stack
+            // frame of the parent function.
+            return (WithPos::dummy(Expr::Variable(WithPos::dummy(static_link_symbol))), Some(typ));
+        }
+
+        let static_link_type_symbol = self.symbols.symbol(&format!("StaticLink{}", self.static_link_index));
+        self.static_link_index += 1;
+
+        if function_level.parent.as_deref() == Some(current_level) {
+            // TODO: update this comment.
+            // When calling a function defined in the current frame, simply pass the current frame
+            // pointer for the static link.
+            match entry {
+                Some(Entry::Var { typ: Type::Record { ref types, .. }, .. }) => {
+                    if escaping_vars.len() > types.len() {
+                        // FIXME: this looks wrong because a static link can contain fewer
+                        // variables than its parent.
+                        unimplemented!();
+                        // New outside variables in used, need to create a
+                        // new record.
+                        let types = vec![];
+                        let data_layout = String::new();
+                        let data_layout = self.gen.string_literal(data_layout);
+                        // TODO: add the field for the static link.
+
+                        let record_type = Type::Record {
+                            data_layout,
+                            name: static_link_type_symbol,
+                            types,
+                            unique: Unique::new(),
+                        };
+                        self.env.enter_type(static_link_type_symbol, record_type.clone());
+
+                        let fields = vec![];
+                        (WithPos::dummy(Expr::Record {
+                            fields,
+                            typ: WithPos::dummy(static_link_type_symbol),
+                        }), Some(record_type))
+                    }
+                    else {
+                        self.logger.print("Else");
+                        let typ =
+                            match entry {
+                                Some(Entry::Var { ref typ, .. }) => typ.clone(),
+                                _ => unreachable!(),
+                            };
+                        // No new outside variables in used, reuse the
+                        // previous record.
+                        (WithPos::dummy(
+                            Expr::Variable(WithPos::dummy(static_link_symbol)),
+                        ), Some(typ))
+                    }
+                },
+                _ => {
+                    self.logger.print("_");
+                    let mut data_layout = String::new();
+                    let typ =
+                        if let Some(Entry::Var { ref typ, .. }) = entry {
+                            typ
+                        }
+                        else {
+                            unreachable!();
+                        };
+                    let mut types = vec![(static_link_symbol, typ.clone())];
+                    data_layout.push('p');
+                    for field in escaping_vars {
+                        let is_pointer = self.actual_ty(&field.typ).is_pointer();
+                        if is_pointer {
+                            data_layout.push('p')
+                        }
+                        else {
+                            data_layout.push('n')
+                        }
+                        types.push((field.ident, field.typ.clone()));
+                    }
+                    let data_layout = self.gen.string_literal(data_layout);
+
+                    self.logger.print(&format!("Static link creating types: {:#?}", types));
+                    let record_type = Type::Record {
+                        data_layout,
+                        name: static_link_type_symbol,
+                        types,
+                        unique: Unique::new(),
+                    };
+                    self.env.enter_type(static_link_type_symbol, record_type.clone());
+
+                    let mut fields = vec![];
+                    fields.push(WithPos::dummy(RecordField {
+                        expr: WithPos::dummy(Expr::Variable(WithPos::dummy(static_link_symbol))),
+                        ident: static_link_symbol,
+                    }));
+                    for field in escaping_vars {
+                        self.logger.print(&format!("Field {} {:?}", fields.len(), self.strings.get(field.ident)));
+                        fields.push(WithPos::dummy(RecordField {
+                            expr: WithPos::dummy(Expr::DirectVariable(WithPos::dummy(field.ident))),
+                            ident: field.ident,
+                        }));
+                    }
+                    (WithPos::dummy(Expr::Record {
+                        fields,
+                        typ: WithPos::dummy(static_link_type_symbol),
+                    }), Some(record_type))
+                }
+            }
+        }
+        else {
+            self.logger.print("else");
+            let mut static_link = WithPos::dummy(Expr::Variable(WithPos::dummy(static_link_symbol)));
+            // When calling a function defined in a parent frame, go up throught the static links.
+            let mut typ =
+                match entry {
+                    Some(Entry::Var { ref typ, .. }) => Some(typ.clone()),
+                    _ => None,
+                };
+
+            {
+                // We start at the parent level, because the static link contains variables from the
+                // parent scope.
+                let mut current_level = current_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
+                // We want to reach the level in which the function is defined.
+                let target_level = function_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
+                while current_level != target_level {
+                    static_link = WithPos::dummy(Expr::Field {
+                        ident: WithPos::dummy(static_link_symbol),
+                        this: Box::new(static_link),
+                    });
+                    if let Some(ref mut typ) = typ {
+                        if let Type::Record { types, .. } = typ.clone() {
+                            for (ident, field_type) in types {
+                                if ident == static_link_symbol {
+                                    *typ = field_type;
+                                }
+                            }
+                        }
+                    }
+                    // TODO: since closures create a new level here, we have to skip that level to
+                    // do one less indirection.
+                    match current_level.parent {
+                        Some(ref parent) => current_level = parent,
+                        None => unreachable!("variable not found in any scope"),
+                    }
+                }
+            }
+            (static_link, typ)
+        }
+    }
+
+    fn find_escaping_vars(&self) -> BTreeSet<ClosureField> {
+        if let Some(escaping_vars) = self.escaping_vars.last() {
+            escaping_vars.iter()
+                .cloned()
+                .collect()
+        }
+        else {
+            BTreeSet::new()
+        }
+        /*let mut escaping_vars = BTreeSet::new();
+        // FIXME: only fetch the parent level, not all the ancestors? because static
+        // links are linked together.
+        for vars in &self.escaping_vars {
+            for var in vars {
+                escaping_vars.insert(var.clone());
+            }
+        }
+        escaping_vars*/
+    }
+
+    fn enter_static_link_param(&mut self, level: &Level<F>, static_link: &BTreeSet<ClosureField>) {
+        let static_link_symbol = self.symbols.symbol(STATIC_LINK_VAR);
+        let access = level.formals().last().expect("static link access").clone();
+
+        let entry = self.env.look_var(static_link_symbol).cloned();
+        let static_link_type =
+            if let Some(Entry::Var { ref typ, .. }) = entry {
+                typ.clone()
+            }
+            else {
+                // Main function doesn't have a static link, create an empty one.
+                Type::StaticLink {
+                    data_layout: self.gen.string_literal(String::new()),
+                    types: vec![],
+                }
+            };
+
+        let mut data_layout = String::new();
+        let mut types = vec![(static_link_symbol, static_link_type)];
+        for var in static_link.iter() {
+            if var.typ.is_pointer() {
+                data_layout.push('p');
+            }
+            else {
+                data_layout.push('n');
+            }
+            types.push((var.ident, var.typ.clone()));
+        }
+        let data_layout = self.gen.string_literal(data_layout);
+
+        // FIXME: since static links are not used for every variable access, and maybe
+        // also because a single variable can be in multiple static links, the writes
+        // to values in static links do not propagate in other functions.
+        // A value should be in only ony static link and every escaping variable access
+        // must go through the static link, even in the function where the variable is
+        // declared.
+        self.env.enter_var(static_link_symbol, Entry::Var { access, typ: Type::StaticLink {
+            data_layout,
+            types,
+        }});
+    }
+
     fn method_label(&self, class: Symbol, method: Symbol) -> Label {
         Label::with_name(&format!("{}_{}",
             self.strings.get(class).expect("strings get"),
@@ -1487,6 +1896,42 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         EXP_TYPE_ERROR
     }
 
+    fn variable_access(&mut self, var_name: &SymbolWithPos, access: gen::Access<F>, level: &Level<F>, done_label: Option<Label>) -> Exp {
+        let escape = self.env.look_escape(var_name.node);
+        if !escape {
+            return simple_var(access, level);
+        }
+        let mut function_level = level;
+        let static_link_symbol = self.symbols.symbol(STATIC_LINK_VAR);
+        if access.0 == *function_level {
+            return simple_var(access, level);
+        }
+
+        // We start at the parent level, because the variable is not in the current frame.
+        function_level = function_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
+        let var_level = access.0;
+
+        self.logger.print(&format!("Variable {:?}", self.strings.get(var_name.node)));
+
+        let mut var = Expr::Variable(WithPos::dummy(static_link_symbol));
+        // TODO: update this comment.
+        // Add the offset of each parent frames (static link).
+        while *function_level != var_level {
+            self.logger.print("================================================== loop");
+            var = Expr::Field {
+                ident: WithPos::dummy(static_link_symbol),
+                this: Box::new(WithPos::dummy(var)),
+            };
+            function_level = function_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
+        }
+        var = Expr::Field {
+            ident: var_name.clone(),
+            this: Box::new(WithPos::dummy(var)),
+        };
+
+        self.trans_exp(&WithPos::dummy(var), level, done_label, true).exp
+    }
+
     fn undefined_function(&mut self, ident: Symbol, pos: Pos) -> ExpTy {
         let ident = self.env.var_name(ident);
         self.add_error(Error::Undefined {
@@ -1539,30 +1984,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-struct ClosureField {
-    ident: Symbol,
-    typ: Type,
-}
-
-impl Eq for ClosureField {
-}
-
-impl PartialOrd for ClosureField {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ClosureField {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.ident.cmp(&other.ident)
-    }
-}
-
 struct EnvFinder<'a, F: Frame> {
     closure_level: Level<F>,
     env: &'a Env<F>,
+    escaping_vars: BTreeSet<ClosureField>,
     fields: BTreeSet<ClosureField>,
 }
 
@@ -1571,6 +1996,7 @@ impl<'a, F: Frame> EnvFinder<'a, F> {
         Self {
             closure_level,
             env,
+            escaping_vars: BTreeSet::new(),
             fields: BTreeSet::new(),
         }
     }
@@ -1578,6 +2004,30 @@ impl<'a, F: Frame> EnvFinder<'a, F> {
 
 #[allow(clippy::needless_lifetimes)]
 impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
+    fn visit_call(&mut self, function: &ExprWithPos, args: &[ExprWithPos]) {
+        self.visit_exp(function);
+        println!("*********************** Call {:?}", function);
+        if let Expr::Variable(ref ident) = function.node {
+            if let Some(&Entry::Fun { ref escaping_vars, .. }) = self.env.look_var(ident.node) {
+                for var in escaping_vars {
+                    if let Some(&Entry::Var { ref access, ref typ, }) = self.env.look_var(var.ident) {
+                        if self.closure_level.current != access.0.current {
+                            self.escaping_vars.insert(ClosureField {
+                                ident: var.ident,
+                                typ: typ.clone(),
+                            });
+                        }
+                    }
+
+                    self.visit_var(&WithPos::dummy(var.ident));
+                }
+            }
+        }
+        for arg in args {
+            self.visit_exp(arg);
+        }
+    }
+
     fn visit_var(&mut self, ident: &SymbolWithPos) {
         // TODO: panic if trying to access a var from static link?
         // TODO: support class field as well?
@@ -1592,15 +2042,15 @@ impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
     }
 }
 
-fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F>, closure_level: Level<F>) -> BTreeSet<ClosureField> {
+fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F>, closure_level: Level<F>) -> (BTreeSet<ClosureField>, BTreeSet<ClosureField>) {
     let mut finder = EnvFinder::new(env, closure_level);
     finder.visit_exp(exp);
-    finder.fields
+    (finder.fields, finder.escaping_vars)
 }
 
 fn type_is_collectable(typ: &Type) -> bool {
     match *typ {
-        Type::Array { .. } | Type::Class { .. } | Type::Function { .. } | Type::Record { .. } | Type::String => true,
+        Type::Array { .. } | Type::Class { .. } | Type::Function { .. } | Type::Record { .. } | Type::StaticLink { .. } | Type::String => true,
         _ => false,
     }
 }

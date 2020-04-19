@@ -95,8 +95,8 @@ extern fn getchar() -> *const c_char {
 extern fn getcharP(continuation: *const c_void) {
     let char = getchar();
     unsafe {
-        let function: fn(*const c_char) = mem::transmute(get_function_pointer(continuation));
-        function(char);
+        let function: fn(*const c_char, *const c_void) = mem::transmute(get_function_pointer(continuation));
+        function(char, continuation);
     }
 }
 
@@ -164,8 +164,10 @@ extern fn print(string: *const c_char) {
 #[no_mangle]
 extern fn printP(string: *const c_char, continuation: *const c_void) {
     print(string);
-    let function = get_function_pointer(continuation);
-    function();
+    unsafe {
+        let function: fn(*const c_void) = mem::transmute(get_function_pointer(continuation));
+        function(continuation);
+    }
 }
 
 #[no_mangle]

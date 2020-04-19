@@ -19,7 +19,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use escape::{DepthEscape, EscapeEnv};
@@ -31,16 +32,37 @@ use symbol::{Strings, Symbol, Symbols};
 use temp::Label;
 use types::{Type, Unique};
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureField {
+    pub ident: Symbol,
+    pub typ: Type,
+}
+
+impl Eq for ClosureField {
+}
+
+impl PartialOrd for ClosureField {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ClosureField {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ident.cmp(&other.ident)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Entry<F: Clone + Frame> {
     ClassField {
         class: Type,
     },
     Fun {
-        access_outside_vars: bool,
         external: bool,
         label: Label,
         level: Level<F>,
+        escaping_vars: BTreeSet<ClosureField>,
         parameters: Vec<Type>,
         pure: bool,
         result: Type,
@@ -112,10 +134,10 @@ impl<F: Clone + Frame> Env<F> {
     fn add_function(&mut self, name: &str, parameters: Vec<Type>, result: Type, pure: bool) {
         let symbol = self.var_env.symbol(name);
         let entry = Entry::Fun {
-            access_outside_vars: false,
             external: true,
             label: Label::with_name(name),
             level: gen::outermost(), // FIXME: Might want to create a new level.
+            escaping_vars: BTreeSet::new(),
             parameters,
             pure,
             result,

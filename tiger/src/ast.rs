@@ -59,6 +59,10 @@ pub enum Expr {
         args: Vec<ExprWithPos>,
         function: Box<ExprWithPos>,
     },
+    CallWithStaticLink {
+        args: Vec<ExprWithPos>,
+        function: Box<ExprWithPos>,
+    },
     Closure {
         body: Box<ExprWithPos>,
         params: Vec<FieldWithPos>,
@@ -72,6 +76,7 @@ pub enum Expr {
     ClosurePointer {
         label: Symbol,
     },
+    DirectVariable(SymbolWithPos),
     Field {
         ident: SymbolWithPos,
         this: Box<ExprWithPos>,

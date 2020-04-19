@@ -41,9 +41,6 @@ pub enum Error {
     BreakOutsideLoop {
         pos: Pos,
     },
-    CannotAccessOutsideVars {
-        pos: Pos,
-    },
     CannotAssignInPureFun {
         pos: Pos,
     },
@@ -161,11 +158,6 @@ impl Error {
             },
             CannotCallImpureFun { pos } => {
                 eprintln!("Cannot call impure functions in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            CannotAccessOutsideVars { pos } => {
-                eprintln!("Cannot convert into a closure a function that accesses variables declared outside of it{}", terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },

@@ -65,8 +65,9 @@ impl EscapeFinder {
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref params, ref body, .. }, .. } in declarations {
                     for param in params {
+                        // TODO: param dig are considered escaping while they should not.
                         self.env.enter(param.node.name, DepthEscape {
-                            depth,
+                            depth: depth + 1,
                             escape: false,
                         });
                     }
@@ -75,7 +76,7 @@ impl EscapeFinder {
             },
             Declaration::Type(_) => (),
             Declaration::VariableDeclaration { ref init, name, .. } => {
-                self.visit_exp(init, depth + 1); // TODO: do we really need to increment depth here?
+                self.visit_exp(init, depth);
                 self.env.enter(name, DepthEscape {
                     depth,
                     escape: false,
@@ -99,17 +100,19 @@ impl EscapeFinder {
             Expr::Closure { ref body, ref params, .. } => {
                 for param in params {
                     self.env.enter(param.node.name, DepthEscape {
-                        depth,
+                        depth: depth + 1,
                         escape: false,
                     });
                 }
                 self.visit_exp(body, depth + 1);
             },
-            Expr::Call { ref args, .. } => {
+            Expr::Call { ref args, ref function, .. } => {
+                self.visit_exp(function, depth);
                 for arg in args {
                     self.visit_exp(arg, depth);
                 }
             },
+            Expr::CallWithStaticLink { .. } => unreachable!(),
             Expr::ClosureParamField { ref ident, .. } | Expr::Field { ref ident, .. } | // TODO: does that make sense to look for the field here?
                 Expr::Variable(ref ident) => {
                 if let Some(ref mut var) = self.env.look_mut(ident.node) {
@@ -119,6 +122,7 @@ impl EscapeFinder {
                 }
             },
             Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
+            Expr::DirectVariable(_) => unreachable!(),
             Expr::FunctionPointerCall { ref args, .. } => {
                 for arg in args {
                     self.visit_exp(arg, depth);

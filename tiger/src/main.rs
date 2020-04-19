@@ -20,6 +20,8 @@
  */
 
 /*
+ * TODO: do not stack allocate escaping variables anymore (since they're on the heap now)?
+ *
  * FIXME: array elements initialized to the same record (instead of allocating a record per
  * element).
  *
@@ -51,6 +53,7 @@ mod graph;
 mod ir;
 mod lexer;
 mod liveness;
+mod log;
 mod opt;
 mod parser;
 mod position;
@@ -194,7 +197,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         let subroutine = frame.proc_entry_exit3(instructions);
                         writeln!(file, "{}", subroutine.prolog)?;
                         for instruction in subroutine.body {
-                            let instruction = instruction.to_string::<X86_64>();
+                            let instruction = instruction.to_string::<X86_64>(Rc::clone(&strings));
                             if !instruction.is_empty() {
                                 writeln!(file, "    {}", instruction)?;
                             }

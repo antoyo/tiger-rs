@@ -83,6 +83,7 @@ impl<'a> Rewriter<'a> {
                     add_declarations(call, declarations, pos)
                 }
             },
+            Expr::CallWithStaticLink { .. } => unreachable!(),
             Expr::Closure { body, params, pure, result } => {
                 WithPos::new(Expr::Closure {
                     body: Box::new(self.rewrite(*body)),
@@ -102,6 +103,7 @@ impl<'a> Rewriter<'a> {
                     label,
                 }, pos)
             },
+            Expr::DirectVariable(_) => unreachable!(),
             Expr::Field { ident, this } => {
                 WithPos::new(Expr::Field {
                     ident,
@@ -350,7 +352,7 @@ fn add_declarations(body: ExprWithPos, declarations: Vec<DeclarationWithPos>, po
 
 fn can_extract(expr: &ExprWithPos) -> bool {
     match expr.node {
-        Expr::Nil => false,
+        Expr::Nil | Expr::Variable(_) => false,
         _ => true,
     }
 }

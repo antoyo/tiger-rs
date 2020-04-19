@@ -83,6 +83,10 @@ pub enum Type {
         types: Vec<(Symbol, Type)>,
         unique: Unique,
     },
+    StaticLink {
+        data_layout: Exp,
+        types: Vec<(Symbol, Type)>,
+    },
     Unit,
     Error,
 }
@@ -90,7 +94,7 @@ pub enum Type {
 impl Type {
     pub fn is_pointer(&self) -> bool {
         match *self {
-            Array { .. } | Class { .. } | Record { .. } | String  => true,
+            Array { .. } | Class { .. } | Record { .. } | StaticLink { .. } | String  => true,
             Name(_, ref typ) => {
                 if let Some(typ) = typ.as_ref() {
                     typ.is_pointer()
@@ -138,6 +142,7 @@ impl Type {
             },
             Nil => "nil".to_string(),
             Record { name, .. } => format!("struct {}", symbols.name(name)),
+            StaticLink { .. } => "static link".to_string(),
             String => "string".to_string(),
             Unit => "()".to_string(),
             Error => "type error".to_string(),
