@@ -38,11 +38,6 @@ pub trait Visitor {
 
     fn visit_dec(&mut self, declaration: &DeclarationWithPos) {
         match declaration.node {
-            Declaration::ClassDeclaration { ref declarations, .. } => {
-                for declaration in declarations {
-                    self.visit_dec(declaration);
-                }
-            },
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref body, .. }, .. } in declarations {
                     self.visit_func_dec(body);
@@ -117,13 +112,6 @@ pub trait Visitor {
                 }
                 self.visit_exp(body);
             },
-            Expr::MethodCall { ref args, ref this, .. } => {
-                self.visit_exp(this);
-                for arg in args {
-                    self.visit_exp(arg);
-                }
-            },
-            Expr::New { .. } => (),
             Expr::Nil => (),
             Expr::Oper { ref left, oper: WithPos { node: Operator::Plus, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Minus, .. }, ref right }

@@ -26,11 +26,6 @@ use temp::Label;
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
-    ClassDeclaration {
-        declarations: Vec<DeclarationWithPos>,
-        name: SymbolWithPos,
-        parent_class: SymbolWithPos,
-    },
     Function(Vec<FuncDeclarationWithPos>),
     Type(Vec<TypeDecWithPos>),
     VariableDeclaration {
@@ -100,14 +95,6 @@ pub enum Expr {
     Let {
         body: Box<ExprWithPos>,
         declarations: Vec<DeclarationWithPos>,
-    },
-    MethodCall {
-        args: Vec<ExprWithPos>,
-        method: SymbolWithPos,
-        this: Box<ExprWithPos>,
-    },
-    New {
-        class_name: SymbolWithPos,
     },
     Nil,
     Oper {

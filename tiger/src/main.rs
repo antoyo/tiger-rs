@@ -157,16 +157,6 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         }
                         writeln!(file, "db {}, 0", to_nasm(string))?;
                     },
-                    Fragment::VTable { ref class, ref methods } => {
-                        writeln!(file, "{}:", class)?;
-                        if !methods.is_empty() {
-                            let labels = methods.iter()
-                                .map(|label| label.to_string())
-                                .collect::<Vec<_>>()
-                                .join("\n    dq ");
-                            writeln!(file, "    dq {}", labels)?;
-                        }
-                    },
                 }
             }
 
@@ -204,7 +194,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         }
                         writeln!(file, "    {}", subroutine.epilog)?;
                     },
-                    Fragment::Str(_, _) | Fragment::VTable { .. } => unreachable!(),
+                    Fragment::Str(_, _)  => unreachable!(),
                 }
             }
 

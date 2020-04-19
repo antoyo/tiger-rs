@@ -19,7 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
@@ -49,14 +49,12 @@ use gen::{
     Level,
     array_subscript,
     binary_oper,
-    class_create,
     field_access,
     function_call,
     function_pointer_call,
     goto,
     if_expression,
     init_array,
-    method_call,
     num,
     record_create,
     relational_oper,
@@ -74,9 +72,6 @@ use self::AddError::*;
 use symbol::{Strings, Symbol, Symbols, SymbolWithPos};
 use temp::{Label, TempMap};
 use types::{
-    ClassField,
-    ClassMethod,
-    FunctionType,
     Type,
     Unique,
 };
@@ -85,8 +80,6 @@ use visitor::Visitor;
 const CLOSURE_PARAM: &str = "__closure_param";
 const CLOSURE_FIELD: &str = "function_pointer";
 const STATIC_LINK_VAR: &str = "__tiger_static_link";
-// Offset 2, because offset 0 is the object type (class) and offset 1 is the data layout.
-pub const VTABLE_OFFSET: usize = 2;
 
 #[derive(PartialEq)]
 enum AddError {
@@ -98,11 +91,6 @@ enum AddError {
 pub struct ExpTy {
     pub exp: Exp,
     pub ty: Type,
-}
-
-pub enum FieldType {
-    Class,
-    Record,
 }
 
 const EXP_TYPE_ERROR: ExpTy =
@@ -120,8 +108,6 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
     gen: Gen<F>,
     in_loop: bool,
     in_pure_fun: bool,
-    methods_level: HashMap<(Symbol, Symbol), Level<F>>,
-    self_symbol: Symbol,
     static_link_index: usize,
     strings: Rc<Strings>,
     symbols: &'a mut Symbols<()>,
@@ -132,7 +118,6 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
 
 impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     pub fn new(env: &'a mut Env<F>, symbols: &'a mut Symbols<()>, strings: Rc<Strings>) -> Self {
-        let self_symbol = symbols.symbol("self");
         SemanticAnalyzer {
             closure_index: 0,
             env,
@@ -142,8 +127,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             gen: Gen::new(),
             in_loop: false,
             in_pure_fun: false,
-            methods_level: HashMap::new(),
-            self_symbol,
             static_link_index: 0,
             symbols,
             strings,
@@ -232,44 +215,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
-    fn check_function_types(&mut self, expected: &FunctionType, unexpected: &FunctionType, pos: Pos) {
-        if expected != unexpected {
-            self.add_error(Error::FunctionType {
-                expected: expected.clone(),
-                pos,
-                unexpected: unexpected.clone(),
-            });
-        }
-    }
-
     fn check_types(&mut self, expected: &Type, unexpected: &Type, pos: Pos) {
         let expected = self.actual_ty(expected);
         let unexpected = self.actual_ty(unexpected);
         if expected != unexpected && expected != Type::Error && unexpected != Type::Error {
-            if let Type::Class { .. } | Type::Record { .. } = expected {
+            if let Type::Record { .. } = expected {
                 if unexpected == Type::Nil {
                     return;
-                }
-            }
-
-            if let Type::Class { name: parent_class, .. } = expected {
-                if let Type::Class { name, .. } = unexpected {
-                    let mut current_class = name;
-                    loop {
-                        if current_class == parent_class {
-                            // NOTE: the expected type is a parent class.
-                            return;
-                        }
-                        let class = self.get_type(&WithPos::dummy(current_class), DontAddError);
-                        if let Type::Class { parent_class, .. } = class {
-                            if let Some(parent_class) = parent_class {
-                                current_class = parent_class.node;
-                            }
-                            else {
-                                break;
-                            }
-                        }
-                    }
                 }
             }
 
@@ -321,175 +273,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         -> Option<Statement>
     {
         match declaration.node {
-            Declaration::ClassDeclaration { ref declarations, ref name, ref parent_class } => {
-                struct Method<F> {
-                    body: ExprWithPos,
-                    level: Level<F>,
-                    param_names: Vec<Symbol>,
-                    param_types: Vec<Type>,
-                    return_type: Type,
-                }
-
-                let empty_class_type = Type::Class {
-                    data_layout: String::new(),
-                    fields: vec![],
-                    methods: vec![],
-                    name: name.node,
-                    parent_class: Some(parent_class.clone()),
-                    unique: Unique::new(),
-                    vtable_name: Label::new(),
-                };
-                self.env.enter_type(name.node, empty_class_type);
-
-                let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
-                let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-
-                let mut pending_methods = vec![];
-                let parent_type = self.get_type(parent_class, AddError);
-                match parent_type {
-                    Type::Class { .. } | Type::Error => (),
-                    _ => {
-                        self.add_error(Error::NotAClass {
-                            pos: parent_class.pos,
-                            typ: parent_type,
-                        });
-                    },
-                }
-                let (mut fields, mut data_layout, parent_methods) = self.parent_members(parent_class);
-                let mut methods = vec![];
-                for declaration in declarations {
-                    match declaration.node {
-                        Declaration::Function(ref functions) => {
-                            for function in functions {
-                                let params = &function.node.params;
-                                let mut param_names = vec![];
-                                let mut param_types = vec![];
-                                let mut param_set = HashSet::new();
-                                for param in params {
-                                    param_types.push(self.get_type(&param.node.typ, AddError));
-                                    param_names.push(param.node.name);
-                                    if !param_set.insert(param.node.name) {
-                                        self.duplicate_param(param);
-                                    }
-                                }
-                                let return_type =
-                                    if let Some(ref result) = function.node.result {
-                                        self.get_type(result, AddError)
-                                    }
-                                    else {
-                                        Type::Unit
-                                    };
-
-                                let mut formals: Vec<_> = params.iter()
-                                    .map(|param| self.env.look_escape(param.node.name))
-                                    .collect();
-                                formals.insert(0, true); // NOTE: self implicit parameter.
-                                let func_name = function.node.name.node;
-                                let label = self.method_label(name.node, func_name);
-                                let level = Level::new(parent_level, label.clone(), formals);
-                                self.methods_level.insert((name.node, func_name), level.clone());
-                                methods.push(ClassMethod {
-                                    class_name: name.node,
-                                    label,
-                                    name: function.node.name.clone(),
-                                    typ: FunctionType {
-                                        param_types: param_types.clone(),
-                                        return_type: return_type.clone(),
-                                    },
-                                });
-
-                                pending_methods.push(Method {
-                                    body: function.node.body.clone(),
-                                    level,
-                                    param_names,
-                                    param_types,
-                                    return_type,
-                                });
-                            }
-                        },
-                        Declaration::VariableDeclaration { ref init, name, ref typ, .. } => {
-                            let exp = self.trans_exp(init, parent_level, done_label.clone(), true);
-                            let is_pointer =
-                                match exp.ty {
-                                    Type::Name(ref symbol, None) if symbol.node == name =>
-                                        true,
-                                    _ => self.actual_ty(&exp.ty).is_pointer(),
-                                };
-                            let typ =
-                                if let Some(ref typ) = *typ {
-                                    let typ = self.get_type(typ, AddError);
-                                    self.check_types(&typ, &exp.ty, init.pos);
-                                    typ
-                                }
-                                else {
-                                    exp.ty
-                                };
-                            if is_pointer {
-                                data_layout.push('p')
-                            }
-                            else {
-                                data_layout.push('n')
-                            }
-                            fields.push(ClassField {
-                                name,
-                                typ,
-                                value: init.clone(),
-                            });
-                        },
-                        _ => unreachable!("cannot get that kind of declaration in a class"),
-                    }
-                }
-                let class_name = self.strings.get(name.node).expect("string get");
-                let vtable_name = Label::with_name(&format!("__vtable_{}", class_name));
-                let methods = self.inherit_methods(parent_methods, &methods);
-                let class_type = Type::Class {
-                    data_layout,
-                    fields,
-                    methods: methods.clone(),
-                    name: name.node,
-                    parent_class: Some(parent_class.clone()),
-                    unique: Unique::new(),
-                    vtable_name: vtable_name.clone(),
-                };
-                self.env.replace_type(name.node, class_type.clone());
-
-                for method in pending_methods {
-                    let body = &method.body;
-                    self.env.begin_scope();
-                    let mut formals = method.level.formals().into_iter();
-                    self.env.enter_var(self.self_symbol, Entry::Var {
-                        access: formals.next().expect("self parameter").clone(),
-                        typ: class_type.clone(),
-                    });
-                    let fields =
-                        match class_type {
-                            Type::Class { ref fields, .. } => fields,
-                            _ => unreachable!(),
-                        };
-                    for field in fields {
-                        self.env.enter_var(field.name, Entry::ClassField { class: class_type.clone() });
-                    }
-                    for ((param, name), access) in method.param_types.into_iter().zip(method.param_names).zip(formals) {
-                        self.env.enter_var(name, Entry::Var { access, typ: param });
-                    }
-                    let exp = self.trans_exp(body, &method.level, done_label.clone(), true);
-                    self.check_types(&method.return_type, &exp.ty, body.pos);
-                    let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_var_locations = mem::take(&mut self.escaping_var_locations);
-                    self.gen.proc_entry_exit(&method.level, exp.exp, current_temp_map, escaping_var_locations);
-                    self.env.end_scope();
-                }
-
-                let method_labels: Vec<_> = methods.iter()
-                    .map(|method| method.label.clone())
-                    .collect();
-                self.gen.vtable(vtable_name, method_labels);
-
-                self.escaping_var_locations = old_escaping_vars;
-                self.temp_map = old_temp_map;
-
-                None
-            },
             Declaration::Function(ref declarations) => {
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
                 let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
@@ -1013,11 +796,11 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let var = self.trans_exp(this, level, done_label, true);
                 if ident.node == self.symbols.symbol(CLOSURE_FIELD) {
                     return ExpTy {
-                        exp: field_access::<F>(var.exp, 0, FieldType::Record), // TODO: do we really want to hard-code this?
+                        exp: field_access::<F>(var.exp, 0), // TODO: do we really want to hard-code this?
                         ty: var.ty.clone(),
                     };
                 }
-                self.add_error(Error::NotARecordOrClass {
+                self.add_error(Error::NotARecord {
                     pos: this.pos,
                     typ: var.ty,
                 });
@@ -1026,22 +809,11 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Field { ref ident, ref this } => {
                 let var = self.trans_exp(this, level, done_label.clone(), true);
                 match var.ty {
-                    Type::Class { name: class_type, ref fields, .. } => {
-                        for (index, class_field) in fields.iter().enumerate() {
-                            if class_field.name == ident.node {
-                                return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Class),
-                                    ty: class_field.typ.clone(),
-                                };
-                            }
-                        }
-                        self.unexpected_field(ident, ident.pos, class_type)
-                    },
                     Type::Record { name: record_type, ref types, .. } => {
                         for (index, &(name, ref typ)) in types.iter().enumerate() {
                             if name == ident.node {
                                 return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Record),
+                                    exp: field_access::<F>(var.exp, index),
                                     ty: typ.clone(),
                                 };
                             }
@@ -1063,7 +835,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             if name == ident.node {
                                 self.logger.print(&format!("Was {:?} at {}", self.strings.get(name), index));
                                 return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Record),
+                                    exp: field_access::<F>(var.exp, index),
                                     ty: typ.clone(),
                                 };
                             }
@@ -1071,7 +843,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         unreachable!();
                     },
                     typ => {
-                        self.add_error(Error::NotARecordOrClass {
+                        self.add_error(Error::NotARecord {
                             pos: this.pos,
                             typ,
                         });
@@ -1166,80 +938,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 ExpTy {
                     exp: var_decs(vars, result.exp),
                     ty: result.ty,
-                }
-            },
-            Expr::MethodCall { ref args, ref method, ref this } => {
-                let this = self.trans_exp(this, level, done_label.clone(), true);
-                let methods =
-                    match this.ty {
-                        Type::Class { ref methods, .. } => {
-                            methods
-                        },
-                        _ => {
-                            return self.undefined_method(method.node, method.pos)
-                        },
-                    };
-
-                for (index, class_method) in methods.iter().enumerate() {
-                    if method.node == class_method.name.node {
-                        let mut expr_args = vec![this.exp];
-                        let method_type = &class_method.typ;
-                        if method_type.param_types.len() != args.len() {
-                            self.add_error(Error::InvalidNumberOfParams {
-                                actual: args.len(),
-                                expected: method_type.param_types.len(),
-                                pos,
-                            });
-                        }
-                        for (arg, param) in args.iter().zip(method_type.param_types.iter()) {
-                            let exp = self.trans_exp(arg, level, done_label.clone(), true);
-                            self.check_types(param, &exp.ty, arg.pos);
-                            expr_args.push(exp.exp);
-                        }
-                        let result = &method_type.return_type;
-                        let collectable_return_type = type_is_collectable(result);
-                        let exp = method_call::<F>(index, expr_args, collectable_return_type);
-                        return ExpTy {
-                            exp,
-                            ty: self.actual_ty(result),
-                        }
-                    }
-                }
-
-                self.undefined_method(method.node, method.pos)
-            },
-            Expr::New { ref class_name } => {
-                // TODO: forbid calling new Object?
-                let class = self.get_type(class_name, AddError);
-                let (data_layout, fields, vtable_name) =
-                    match class {
-                        Type::Class { ref data_layout, ref fields, ref vtable_name, .. } => {
-                            (self.gen.string_literal(data_layout.clone()), fields.clone(), vtable_name.clone())
-                        },
-                        Type::Error => (Exp::Error, vec![], Label::new()),
-                        _ => {
-                            self.add_error(Error::UnexpectedType {
-                                kind: "record".to_string(),
-                                pos: class_name.pos,
-                            });
-                            return EXP_TYPE_ERROR;
-                        },
-                    };
-                // NOTE: we put the class on the stack immediately, because it could contain
-                // heap-allocated values, which could causes the heap to be moved.
-                let access = gen::alloc_local(level, true);
-                self.temp_map.insert::<F>(&access.1);
-                if let Some(stack_var) = access.1.as_stack() {
-                    self.escaping_var_locations.push(stack_var);
-                }
-                let mut field_exprs = vec![];
-                for field in &fields {
-                    field_exprs.push(self.trans_exp(&field.value, level, done_label.clone(), false).exp);
-                }
-                let exp = class_create::<F>(access, data_layout, field_exprs, vtable_name);
-                ExpTy {
-                    exp,
-                    ty: class,
                 }
             },
             Expr::Nil =>
@@ -1395,24 +1093,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             ty: self.actual_ty(typ),
                         }
                     },
-                    Some(Entry::ClassField { class }) => {
-                        let fields =
-                            match class {
-                                Type::Class { ref fields, .. } => fields,
-                                _ => unreachable!(),
-                            };
-                        for (index, class_field) in fields.iter().enumerate() {
-                            if class_field.name == ident.node {
-                                let this = self.trans_exp(&WithPos::dummy(Expr::Variable(WithPos::dummy(self.self_symbol))),
-                                    level, done_label, true);
-                                return ExpTy {
-                                    exp: field_access::<F>(this.exp, index, FieldType::Class),
-                                    ty: class_field.typ.clone(),
-                                };
-                            }
-                        }
-                        unreachable!();
-                    },
                     Some(Entry::Fun { ref label, ref parameters, ref result, .. }) => {
                         let mut data_layout = String::new();
                         data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
@@ -1466,7 +1146,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 let this = self.trans_exp(&WithPos::dummy(Expr::Variable(WithPos::dummy(closure_symbol))),
                                     level, done_label, true);
                                 return ExpTy {
-                                    exp: field_access::<F>(this.exp, index, FieldType::Record),
+                                    exp: field_access::<F>(this.exp, index),
                                     ty: typ.clone(),
                                 };
                             }
@@ -1722,52 +1402,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }});
     }
 
-    fn method_label(&self, class: Symbol, method: Symbol) -> Label {
-        Label::with_name(&format!("{}_{}",
-            self.strings.get(class).expect("strings get"),
-            self.strings.get(method).expect("strings get"),
-        ))
-    }
-
-    fn parent_members(&mut self, class: &SymbolWithPos) -> (Vec<ClassField>, String, Vec<ClassMethod>) {
-        let mut parent_fields = vec![];
-        let mut parent_data_layout = vec![];
-        let mut parent_methods: Vec<ClassMethod> = vec![];
-        let mut parent = self.get_type(class, DontAddError);
-        while let Type::Class { ref data_layout, ref fields, name, ref methods, ref parent_class, .. } = parent {
-            parent_fields.push(fields.clone());
-            parent_data_layout.push(data_layout.clone());
-
-            for method in methods {
-                if let Some(parent_method) = parent_methods.iter_mut().find(|parent_method| parent_method.name == method.name) {
-                    parent_method.label = method.label.clone();
-                }
-                else {
-                    parent_methods.push(ClassMethod {
-                        class_name: name,
-                        label: method.label.clone(),
-                        name: method.name.clone(),
-                        typ: method.typ.clone(),
-                    });
-                }
-            }
-
-            if let Some(ref parent_class) = *parent_class {
-                parent = self.get_type(parent_class, DontAddError);
-            }
-            else {
-                break;
-            }
-        }
-        let fields = parent_fields.into_iter().rev()
-            .flatten()
-            .collect();
-        let data_layout = parent_data_layout.into_iter().rev()
-            .collect::<Vec<_>>()
-            .join("");
-        (fields, data_layout, parent_methods)
-    }
-
     fn duplicate_param(&mut self, param: &FieldWithPos) {
         let ident = self.env.var_name(param.node.name);
         self.add_error(Error::DuplicateParam {
@@ -1785,20 +1419,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             struct_name,
         });
         EXP_TYPE_ERROR
-    }
-
-    fn inherit_methods(&mut self, parent_methods: Vec<ClassMethod>, method_labels: &[ClassMethod]) -> Vec<ClassMethod> {
-        let mut labels = parent_methods.clone();
-        for method in method_labels {
-            if let Some(index) = parent_methods.iter().position(|parent_method| parent_method.name == method.name) {
-                self.check_function_types(&parent_methods[index].typ, &method.typ, method.name.pos);
-                labels[index] = method.clone();
-            }
-            else {
-                labels.push(method.clone());
-            }
-        }
-        labels
     }
 
     fn missing_field(&mut self, field_type: Symbol, typ: &SymbolWithPos) -> ExpTy {
@@ -1860,16 +1480,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.add_error(Error::Undefined {
             ident,
             item: "function".to_string(),
-            pos,
-        });
-        EXP_TYPE_ERROR
-    }
-
-    fn undefined_method(&mut self, ident: Symbol, pos: Pos) -> ExpTy {
-        let ident = self.env.var_name(ident);
-        self.add_error(Error::Undefined {
-            ident,
-            item: "method".to_string(),
             pos,
         });
         EXP_TYPE_ERROR
@@ -1951,7 +1561,6 @@ impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
     }
 
     fn visit_var(&mut self, ident: &SymbolWithPos) {
-        // TODO: support class field as well?
         if let Some(&Entry::Var { ref access, ref typ, }) = self.env.look_var(ident.node) {
             if self.closure_level.current != access.0.current {
                 self.fields.insert(ClosureField {
@@ -1971,7 +1580,7 @@ fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F
 
 fn type_is_collectable(typ: &Type) -> bool {
     match *typ {
-        Type::Array { .. } | Type::Class { .. } | Type::Function { .. } | Type::Record { .. } | Type::StaticLink { .. } | Type::String => true,
+        Type::Array { .. } | Type::Function { .. } | Type::Record { .. } | Type::StaticLink { .. } | Type::String => true,
         _ => false,
     }
 }

@@ -175,7 +175,6 @@ impl<R: Read> Lexer<R> {
             match ident.as_str() {
                 "array" => Array,
                 "break" => Break,
-                "class" => Class,
                 "do" => Do,
                 "else" => Else,
                 "end" => End,
@@ -185,8 +184,6 @@ impl<R: Read> Lexer<R> {
                 "if" => If,
                 "in" => In,
                 "let" => Let,
-                "method" => Method,
-                "new" => New,
                 "nil" => Nil,
                 "of" => Of,
                 "pure" => Pure,

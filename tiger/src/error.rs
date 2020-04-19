@@ -29,7 +29,7 @@ use self::Error::*;
 use symbol::Symbols;
 use terminal::Terminal;
 use token::Tok;
-use types::{FunctionType, Type};
+use types::Type;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -64,11 +64,6 @@ pub enum Error {
         pos: Pos,
         struct_name: String,
     },
-    FunctionType {
-        expected: FunctionType,
-        pos: Pos,
-        unexpected: FunctionType,
-    },
     InvalidEscape {
         escape: String,
         pos: Pos,
@@ -88,11 +83,7 @@ pub enum Error {
     NoLoopInPureFun {
         pos: Pos,
     },
-    NotAClass {
-        pos: Pos,
-        typ: Type,
-    },
-    NotARecordOrClass {
+    NotARecord {
         pos: Pos,
         typ: Type,
     },
@@ -184,11 +175,6 @@ impl Error {
                 eprintln!("Extra field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
                 pos.show(symbols, terminal);
             },
-            Error::FunctionType { ref expected, pos, ref unexpected } => {
-                eprintln!("Overridden method should have the same type as the inherited method:\nunexpected {}\n expecting {}{}", unexpected.show(symbols), expected.show(symbols), terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
             InvalidEscape { ref escape, pos } => {
                 eprintln!("Invalid escape \\{}{}", escape, terminal.end_bold());
                 pos.show(symbols, terminal);
@@ -210,13 +196,8 @@ impl Error {
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },
-            NotAClass { pos, ref typ } => {
-                eprintln!("Type `{}` is not a class type{}", typ.show(symbols), terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            NotARecordOrClass { pos, ref typ } => {
-                eprintln!("Type `{}` is not a struct or a class type{}", typ.show(symbols), terminal.end_bold());
+            NotARecord { pos, ref typ } => {
+                eprintln!("Type `{}` is not a struct{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },

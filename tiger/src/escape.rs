@@ -57,11 +57,6 @@ impl EscapeFinder {
 
     fn visit_dec(&mut self, declaration: &DeclarationWithPos, depth: u32) {
         match declaration.node {
-            Declaration::ClassDeclaration { ref declarations, .. } => {
-                for declaration in declarations {
-                    self.visit_dec(declaration, depth + 1);
-                }
-            },
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref params, ref body, .. }, .. } in declarations {
                     for param in params {
@@ -142,12 +137,6 @@ impl EscapeFinder {
                 }
                 self.visit_exp(body, depth);
             },
-            Expr::MethodCall { ref args, .. } => {
-                for arg in args {
-                    self.visit_exp(arg, depth);
-                }
-            },
-            Expr::New { .. } => (),
             Expr::Nil => (),
             Expr::Oper { ref left, oper: WithPos { node: Operator::Plus, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Minus, .. }, ref right }

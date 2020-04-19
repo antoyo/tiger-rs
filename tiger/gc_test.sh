@@ -2,7 +2,7 @@
 
 (( i = 1 ))
 
-files=(array array_assignment comments conditions escapes functions gc hello hello1 hello2 hello3 hello5 integers lib loops merge nested prettyprint queens record spill strings vars)
+files=(array array_assignment comments conditions escapes functions gc hello hello1 hello2 hello3 hello5 integers lib loops nested queens record spill strings vars)
 
 while true; do
     echo "******************************"

@@ -30,7 +30,7 @@ use gen::{Access, Level};
 use position::WithPos;
 use symbol::{Strings, Symbol, Symbols};
 use temp::Label;
-use types::{Type, Unique};
+use types::Type;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClosureField {
@@ -55,9 +55,6 @@ impl Ord for ClosureField {
 
 #[derive(Clone, Debug)]
 pub enum Entry<F: Clone + Frame> {
-    ClassField {
-        class: Type,
-    },
     Fun {
         external: bool,
         label: Label,
@@ -90,20 +87,9 @@ impl<F: Clone + Frame> Env<F> {
         let string_symbol = type_env.symbol("string");
         type_env.enter(string_symbol, Type::String);
 
-        let object_symbol = type_env.symbol("Object");
         let answer_symbol = type_env.symbol("answer");
         let cont_symbol = type_env.symbol("cont");
         let string_consumer_symbol = type_env.symbol("stringConsumer");
-
-        let object_class = Type::Class {
-            data_layout: String::new(),
-            fields: vec![],
-            methods: vec![],
-            name: object_symbol,
-            parent_class: None,
-            unique: Unique::new(),
-            vtable_name: Label::with_name("__vtable_Object"),
-        };
 
         let var_env = Symbols::new(Rc::clone(strings));
         let mut env = Self {
@@ -115,8 +101,6 @@ impl<F: Clone + Frame> Env<F> {
         for (name, (param_types, return_type, pure)) in env.external_functions() {
             env.add_function(name, param_types, return_type, pure);
         }
-
-        env.enter_type(object_symbol, object_class);
 
         env.enter_type(answer_symbol, Type::Answer);
         env.enter_type(cont_symbol, Type::Function {
@@ -220,7 +204,6 @@ impl<F: Clone + Frame> Env<F> {
         functions.insert("getcharP", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer, true));
         functions.insert("exit", (vec![], Type::Answer, true));
 
-        functions.insert("allocClass", (vec![Type::Int], Type::Int, true));
         functions.insert("allocRecord", (vec![Type::Int], Type::Int, true));
         functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int, true));
         functions

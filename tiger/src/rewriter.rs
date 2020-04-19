@@ -177,33 +177,6 @@ impl<'a> Rewriter<'a> {
                     declarations: new_declarations,
                 }, pos)
             },
-            Expr::MethodCall { args, method, this } => {
-                let mut new_args = vec![];
-                let mut declarations = vec![];
-                for arg in args {
-                    if can_extract(&arg) {
-                        let (name, declaration) = self.extract(arg);
-                        declarations.push(WithPos::new(declaration, pos));
-                        new_args.push(variable(name, pos));
-                    }
-                    else {
-                        new_args.push(self.rewrite(arg));
-                    }
-                }
-                let call = WithPos::new(Expr::MethodCall {
-                    args: new_args,
-                    method,
-                    this: Box::new(self.rewrite(*this)),
-                }, pos);
-
-                if declarations.is_empty() {
-                    call
-                }
-                else {
-                    add_declarations(call, declarations, pos)
-                }
-            },
-            Expr::New { class_name } => WithPos::new(Expr::New { class_name }, pos),
             Expr::Nil => WithPos::new(Expr::Nil, pos),
             Expr::Oper { left, right, oper } => {
                 let mut declarations = vec![];
@@ -296,18 +269,6 @@ impl<'a> Rewriter<'a> {
     fn rewrite_dec(&mut self, mut declaration: DeclarationWithPos) -> DeclarationWithPos {
         declaration.node =
             match declaration.node {
-                Declaration::ClassDeclaration { declarations, name, parent_class } => {
-                    let declarations =
-                        declarations
-                            .into_iter()
-                            .map(|declaration| self.rewrite_dec(declaration))
-                            .collect();
-                    Declaration::ClassDeclaration {
-                        declarations,
-                        name,
-                        parent_class,
-                    }
-                },
                 Declaration::Function(functions) => {
                     let mut new_functions = vec![];
                     for mut function in functions {

@@ -34,7 +34,6 @@ use std::result;
 
 use ast::{
     Declaration,
-    Declaration::ClassDeclaration,
     Declaration::VariableDeclaration,
     DeclarationWithPos,
     Expr,
@@ -227,31 +226,6 @@ impl<'a, R: Read> Parser<'a, R> {
         }
     }
 
-    fn class_dec(&mut self) -> Result<DeclarationWithPos> {
-        unreachable!("Remove class");
-        let pos = eat!(self, Class);
-        let name;
-        let ident_pos = eat!(self, Ident, name);
-        let name = WithPos::new(self.symbols.symbol(&name), ident_pos);
-        eat!(self, Extends);
-        let parent_class;
-        let ident_pos = eat!(self, Ident, parent_class);
-        let parent_class = WithPos::new(self.symbols.symbol(&parent_class), ident_pos);
-        eat!(self, OpenCurly);
-
-        let mut declarations = vec![];
-        while let Method | Var = self.peek()?.token {
-            declarations.push(self.dec()?);
-        }
-
-        let end_pos = eat!(self, CloseCurly);
-        Ok(WithPos::new(ClassDeclaration {
-            declarations,
-            name,
-            parent_class,
-        }, pos.grow(end_pos)))
-    }
-
     fn closure(&mut self) -> Result<ExprWithPos> {
         let pure =
             if self.peek()?.token == Pure {
@@ -279,9 +253,7 @@ impl<'a, R: Read> Parser<'a, R> {
 
     fn dec(&mut self) -> Result<DeclarationWithPos> {
         match self.peek()?.token {
-            Class => self.class_dec(),
             Pure | Function => self.fun_decs(Function),
-            Method => self.fun_decs(Method),
             Type => self.ty_decs(),
             Var => self.var_dec(),
             _ => Err(self.unexpected_token("function, type or var")?),
@@ -307,29 +279,17 @@ impl<'a, R: Read> Parser<'a, R> {
         }, pos))
     }
 
-    fn field_exp_or_method_call(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
+    fn field_exp(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
         eat!(self, Dot);
         let name;
         let pos = eat!(self, Ident, name);
         let name = WithPos::new(self.symbols.symbol(&name), pos);
-        if self.peek()?.token == OpenParen {
-            let (args, end_pos) = self.call_args()?;
-            let call_pos = var.pos.grow(end_pos);
-            let method_call = WithPos::new(Expr::MethodCall {
-                args,
-                method: name,
-                this: Box::new(var),
-            }, call_pos);
-            self.lvalue(method_call)
-        }
-        else {
-            let var_pos = var.pos.grow(pos);
-            let var = WithPos::new(Expr::Field {
-                ident: name,
-                this: Box::new(var),
-            }, var_pos);
-            self.lvalue(var)
-        }
+        let var_pos = var.pos.grow(pos);
+        let var = WithPos::new(Expr::Field {
+            ident: name,
+            this: Box::new(var),
+        }, var_pos);
+        self.lvalue(var)
     }
 
     fn fields(&mut self) -> Result<Vec<FieldWithPos>> {
@@ -501,10 +461,10 @@ impl<'a, R: Read> Parser<'a, R> {
     fn let_expr(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Let);
         let mut declarations = vec![self.dec()?];
-        while let Class | Function | Pure | Type | Var = self.peek()?.token {
+        while let Function | Pure | Type | Var = self.peek()?.token {
             declarations.push(self.dec()?);
         }
-        eat!(self, In, "class, function, in, type, var".to_string());
+        eat!(self, In, "function, in, type, var".to_string());
         let expr = self.expr()?;
         let mut exprs = vec![expr];
         while let Semicolon = self.peek()?.token {
@@ -552,7 +512,7 @@ impl<'a, R: Read> Parser<'a, R> {
     fn lvalue(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
         match self.peek()?.token {
             OpenSquare => self.subscript(var),
-            Dot => self.field_exp_or_method_call(var),
+            Dot => self.field_exp(var),
             _ => Ok(var),
         }
     }
@@ -611,16 +571,6 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(expr)
     }
 
-    fn new_object(&mut self) -> Result<ExprWithPos> {
-        let pos = eat!(self, New);
-        let class_name;
-        let end_pos = eat!(self, Ident, class_name);
-        let class_name = WithPos::new(self.symbols.symbol(&class_name), end_pos);
-        Ok(WithPos::new(Expr::New {
-            class_name,
-        }, pos.grow(end_pos)))
-    }
-
     fn nil(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Nil);
         Ok(WithPos::new(Expr::Nil, pos))
@@ -647,7 +597,6 @@ impl<'a, R: Read> Parser<'a, R> {
             Ident(_) => self.call_expr_or_other(),
             Int(_) => self.int_lit(),
             Let => self.let_expr(),
-            New => self.new_object(),
             Nil => self.nil(),
             OpenParen => self.seq_exp(),
             Str(_) => self.string_lit(),

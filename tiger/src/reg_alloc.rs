@@ -557,7 +557,6 @@ mod tests {
                         return (intervals, precolored_intervals);
                     },
                     Fragment::Str(_, _) => (),
-                    Fragment::VTable { .. } => (),
                 }
             }
         }
