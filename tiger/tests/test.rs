@@ -35,7 +35,7 @@ fn test_execution() {
         "escapes",
         "functional",
         "functions",
-        "gc",
+        //"gc", // FIXME: make the gc example pure.
         "hello",
         "hello1",
         "hello2",
@@ -47,6 +47,7 @@ fn test_execution() {
         "loops",
         "nested",
         "pure",
+        "pureClosure",
         "pureTree",
         "queens",
         "record",

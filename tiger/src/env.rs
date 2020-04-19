@@ -28,7 +28,12 @@ use frame::Frame;
 use gen;
 use gen::{Access, Level};
 use position::WithPos;
-use symbol::{Strings, Symbol, Symbols};
+use symbol::{
+    Strings,
+    Symbol,
+    Symbols,
+    SymbolWithPos,
+};
 use temp::Label;
 use types::Type;
 
@@ -57,12 +62,15 @@ impl Ord for ClosureField {
 pub enum Entry<F: Clone + Frame> {
     Fun {
         external: bool,
+        is_normal_function: bool,
         label: Label,
         level: Level<F>,
         escaping_vars: BTreeSet<ClosureField>,
         parameters: Vec<Type>,
+        param_type_symbols: Vec<SymbolWithPos>,
         pure: bool,
         result: Type,
+        result_symbol: Option<SymbolWithPos>,
     },
     RecordField {
         record: Type,
@@ -119,12 +127,15 @@ impl<F: Clone + Frame> Env<F> {
         let symbol = self.var_env.symbol(name);
         let entry = Entry::Fun {
             external: true,
+            is_normal_function: true,
             label: Label::with_name(name),
             level: gen::outermost(), // FIXME: Might want to create a new level.
             escaping_vars: BTreeSet::new(),
             parameters,
+            param_type_symbols: vec![],
             pure,
             result,
+            result_symbol: None,
         };
         self.var_env.enter(symbol, entry);
     }
@@ -186,10 +197,6 @@ impl<F: Clone + Frame> Env<F> {
 
     pub fn external_functions(&mut self) -> BTreeMap<&'static str, (Vec<Type>, Type, bool)> {
         let mut functions = BTreeMap::new();
-        functions.insert("print", (vec![Type::String], Type::Unit, false));
-        functions.insert("printi", (vec![Type::Int], Type::Unit, false));
-        functions.insert("flush", (vec![], Type::Unit, false));
-        functions.insert("getchar", (vec![], Type::String, false));
         functions.insert("ord", (vec![Type::String], Type::Int, true));
         functions.insert("chr", (vec![Type::Int], Type::String, true));
         functions.insert("size", (vec![Type::String], Type::Int, true));
@@ -199,9 +206,10 @@ impl<F: Clone + Frame> Env<F> {
         functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int, true));
 
         let cont = Type::Name(WithPos::dummy(self.type_env.symbol("cont")), None);
-        functions.insert("printP", (vec![Type::String, cont.clone()], Type::Answer, true));
-        functions.insert("flushP", (vec![cont], Type::Answer, true));
-        functions.insert("getcharP", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer, true));
+        functions.insert("printi", (vec![Type::Int, cont.clone()], Type::Answer, true));
+        functions.insert("print", (vec![Type::String, cont.clone()], Type::Answer, true));
+        functions.insert("flush", (vec![cont], Type::Answer, true));
+        functions.insert("getchar", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer, true));
         functions.insert("exit", (vec![], Type::Answer, true));
 
         functions.insert("allocRecord", (vec![Type::Int], Type::Int, true));

@@ -9,30 +9,39 @@ let var num := 42
             "true"
         else
             "false"
-in (
+
+    pure function step8() =
+        print("\n", exit)
+
+    pure function step7() =
+        print(true, step8)
+
+    pure function step6() =
+        print("\n", step7)
+
+    pure function step5() =
+        print(false, step6)
+
+    pure function step4() =
+        if num < 42 then
+            print("num < 42\n", step5)
+        else
+            print("num >= 42\n", step5)
+
+    pure function step3() =
+        if num > 42 then
+            print("num > 42\n", step4)
+        else
+            print("num <= 42\n", step4)
+
+    pure function step2() =
+        if num < 40 then
+            print("num < 40\n", step3)
+        else
+            print("num >= 40\n", step3)
+in
     if num > 40 then
-        print("num > 40\n")
+        print("num > 40\n", step2)
     else
-        print("num <= 40\n");
-
-    if num < 40 then
-        print("num < 40\n")
-    else
-        print("num >= 40\n");
-
-    if num > 42 then
-        print("num > 42\n")
-    else
-        print("num <= 42\n");
-
-    if num < 42 then
-        print("num < 42\n")
-    else
-        print("num >= 42\n");
-
-    print(false);
-    print("\n");
-    print(true);
-    print("\n")
-)
+        print("num <= 40\n", step2)
 end

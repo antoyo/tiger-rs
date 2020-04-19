@@ -29,6 +29,7 @@ use ast::{
     DeclarationWithPos,
     Expr,
     ExprWithPos,
+    Field,
     FieldWithPos,
     FuncDeclaration,
     Operator,
@@ -225,6 +226,8 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             }
 
+            panic!("{:?} != {:?}", expected, unexpected);
+
             self.add_error(Error::Type {
                 expected,
                 pos,
@@ -298,8 +301,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     // TODO: error when name already exist?
                     let mut param_names = vec![];
                     let mut parameters = vec![];
+                    let mut param_type_symbols = vec![];
                     let mut param_set = HashSet::new();
                     for param in params {
+                        param_type_symbols.push(param.node.typ.clone());
                         parameters.push(self.get_type(&param.node.typ, AddError));
                         param_names.push(param.node.name);
                         if !param_set.insert(param.node.name) {
@@ -313,12 +318,15 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                     self.env.enter_var(func_symbol, Entry::Fun {
                         external: false,
+                        is_normal_function: true,
                         label: Label::with_name(&func_name),
                         level,
                         escaping_vars,
                         parameters,
+                        param_type_symbols,
                         pure,
                         result: result_type.clone(),
+                        result_symbol: result.clone(),
                     });
                 }
 
@@ -508,7 +516,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     Expr::Variable(ref func) => {
                         match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
                             Some(Entry::Fun { external, ref parameters, level: ref function_level, ref escaping_vars, .. }) => {
-                                // TODO: uncomment this code.
+                                // TODO: remove this code.
                                 /*if self.in_pure_fun && !pure {
                                     self.add_error(Error::CannotCallImpureFun {
                                         pos,
@@ -553,7 +561,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     }, pos)),
                                 }, pos),
                                 level, done_label, true)
-                            },
+                            }
                             Some(_) => self.closure_call(function, args, level, done_label),
                             None => self.undefined_function(func.node, func.pos),
                         }
@@ -574,6 +582,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     let mut expr_args = vec![];
                                     for (arg, param) in args.iter().zip(parameters) {
                                         let exp = self.trans_exp(arg, level, done_label.clone(), true);
+                                        println!("Callwith {:?} != {:?}", param, exp.ty);
                                         self.check_types(param, &exp.ty, arg.pos);
                                         expr_args.push(exp.exp);
                                     }
@@ -642,7 +651,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let (mut env_fields, escaping_vars) = find_closure_environment(body, self.env, closure_level);
                 let static_link_ident = self.symbols.symbol(STATIC_LINK_VAR);
+                println!("*********** Equal {}", level == &func_level);
                 let (init, typ) = self.access_static_link(&escaping_vars, level, &func_level);
+
+                println!("****************** Static link type {:?}", typ);
                 env_fields.insert(ClosureField {
                     ident: static_link_ident,
                     typ: typ.expect("static link"),
@@ -652,6 +664,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let mut types = vec![(function_pointer_symbol, Type::Int)];
 
+                println!("Start");
                 for field in &env_fields {
                     let is_pointer = self.actual_ty(&field.typ).is_pointer();
                     if is_pointer {
@@ -660,11 +673,17 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     else {
                         data_layout.push('n')
                     }
+                    println!("------> {:?}: {:?}", self.strings.get(field.ident), field.typ);
+                    if let Type::Record { name, .. } = field.typ {
+                        println!("Record name: {:?}", self.strings.get(name));
+                    }
                     types.push((field.ident, field.typ.clone()));
                 }
+                println!("End");
                 let data_layout = self.gen.string_literal(data_layout);
 
                 let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
+                self.closure_index += 1;
                 let record_type = Type::Record {
                     data_layout,
                     name: closure_symbol,
@@ -678,7 +697,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         body: *body.clone(),
                         name: WithPos::new(func_name, pos),
                         params: params.clone(),
-                        pure: false,
+                        pure: true,
                         result: result.clone(),
                     };
 
@@ -713,12 +732,15 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     parameters.push(record_type.clone());
                     self.env.enter_var(func_name, Entry::Fun {
                         external: false,
+                        is_normal_function: false,
                         label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
                         level: func_level.clone(),
                         escaping_vars: BTreeSet::new(),
                         parameters: parameters.clone(),
-                        pure: false,
+                        param_type_symbols: vec![],
+                        pure: true,
                         result: result_type.clone(),
+                        result_symbol: None,
                     });
 
                     self.env.begin_scope();
@@ -754,8 +776,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     parameters,
                     return_type: Box::new(result_type),
                 };
-
-                self.closure_index += 1;
 
                 let label = self.symbols.symbol(&name);
                 let mut fields = vec![WithPos::new(RecordField {
@@ -975,17 +995,20 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             },
             Expr::Record { ref fields, ref typ } => {
+                println!("Record {:?} ({})", self.strings.get(typ.node), typ.node);
                 let ty = self.get_type(typ, AddError);
                 let mut field_exprs = vec![];
                 let data_layout =
                     match ty {
                         Type::Record { ref data_layout, ref types, .. } => {
+                            println!("Types: {:#?}", types);
                             for &(type_field_name, ref type_field) in types {
                                 let mut found = false;
                                 for field in fields {
                                     if type_field_name == field.node.ident {
                                         found = true;
                                         let field_expr = self.trans_exp(&field.node.expr, level, done_label.clone(), true);
+                                        println!("Field {:?}", self.strings.get(type_field_name));
                                         self.check_types(type_field, &field_expr.ty, field.node.expr.pos);
                                         field_exprs.push(field_expr.exp);
                                     }
@@ -1093,14 +1116,65 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             ty: self.actual_ty(typ),
                         }
                     },
-                    Some(Entry::Fun { ref label, ref parameters, ref result, .. }) => {
-                        let mut data_layout = String::new();
+                    Some(Entry::Fun { is_normal_function, ref parameters, ref param_type_symbols, ref result, ref result_symbol, .. }) => {
+                        let closure =
+                            if is_normal_function { // TODO: remove is_normal_function.
+                                let mut args = vec![];
+                                let mut params = vec![];
+                                for (index, param) in param_type_symbols.iter().enumerate() {
+                                    let name = self.symbols.symbol(&format!("__arg{}", index));
+                                    args.push(WithPos::new(Expr::Variable(WithPos::new(name, pos)), pos));
+                                    self.env.enter_escape(name, false);
+                                    params.push(WithPos::new(
+                                            Field {
+                                                escape: false,
+                                                name,
+                                                typ: param.clone(),
+                                            },
+                                            pos,
+                                    ));
+                                }
+                                println!("==================== Creating closure for {:?}", self.strings.get(ident.node));
+                                Expr::Closure {
+                                    body: Box::new(WithPos::new(Expr::Call {
+                                        args,
+                                        function: Box::new(WithPos::new(Expr::Variable(ident.clone()), pos)),
+                                    }, pos)),
+                                    params,
+                                    pure: true,
+                                    result: result_symbol.clone(),
+                                }
+                            }
+                            else {
+                                println!("*** using var for closure");
+                                Expr::Variable(ident.clone())
+                            };
+
+                        /*let mut data_layout = String::new();
                         data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
-                        let data_layout = self.gen.string_literal(data_layout);
 
                         let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
 
-                        let types = vec![(function_pointer_symbol, Type::Int)];
+                        let mut types = vec![(function_pointer_symbol, Type::Int)];
+
+                        let static_link_ident = self.symbols.symbol(STATIC_LINK_VAR);
+                        let (init, typ) = self.access_static_link(&escaping_vars, level, &func_level);
+                        let mut env_fields = BTreeSet::new();
+                        env_fields.insert(ClosureField {
+                            ident: static_link_ident,
+                            typ: typ.expect("static link"),
+                        });
+                        for field in &env_fields {
+                            let is_pointer = self.actual_ty(&field.typ).is_pointer();
+                            if is_pointer {
+                                data_layout.push('p')
+                            }
+                            else {
+                                data_layout.push('n')
+                            }
+                            types.push((field.ident, field.typ.clone()));
+                        }
+                        let data_layout = self.gen.string_literal(data_layout);
 
                         let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
                         let record_type = Type::Record {
@@ -1111,24 +1185,45 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         };
                         self.env.enter_type(closure_symbol, record_type.clone());
 
-                        let ty = Type::Function {
-                            parameters: parameters.clone(),
-                            return_type: Box::new(result.clone()),
-                        };
-
                         self.closure_index += 1;
 
-                        let fields = vec![WithPos::new(RecordField {
+                        let mut fields = vec![WithPos::new(RecordField {
                             expr: WithPos::new(Expr::FunctionPointer {
                                 label: label.clone(),
                             }, pos),
                             ident: function_pointer_symbol,
                         }, pos)];
+                        for field in &env_fields {
+                            fields.push(WithPos::new(RecordField {
+                                expr: WithPos::new(Expr::Variable(WithPos::new(field.ident, pos)), pos),
+                                ident: field.ident,
+                            }, pos));
+                        }
 
-                        let closure = self.trans_exp(&WithPos::new(Expr::Record {
-                            fields,
-                            typ: WithPos::new(closure_symbol, pos),
-                        }, pos), level, done_label, true);
+                        // TODO: add static link.
+                        let declarations = vec![
+                            WithPos::new(Declaration::VariableDeclaration {
+                                escape: true,
+                                name: static_link_ident,
+                                init,
+                                typ: None,
+                            }, pos)
+                        ];
+                        let closure = self.trans_exp(&WithPos::new(Expr::Let {
+                            declarations,
+                            body: Box::new(WithPos::new(Expr::Record {
+                                fields,
+                                typ: WithPos::new(closure_symbol, pos),
+                            }, pos)),
+                        }, pos), level, done_label, true);*/
+
+                        let ty = Type::Function {
+                            parameters: parameters.clone(),
+                            return_type: Box::new(result.clone()),
+                        };
+
+                        let closure = self.trans_exp(&WithPos::new(closure, pos), level, done_label, true);
+
                         ExpTy {
                             exp: closure.exp,
                             ty,
@@ -1241,10 +1336,26 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             let typ =
                 match entry {
                     Some(Entry::Var { ref typ, .. }) => typ.clone(),
-                    _ => unreachable!(),
+                    Some(Entry::RecordField { ref record }) => {
+                        let fields =
+                            match *record {
+                                Type::Record { ref types, .. } => types,
+                                _ => unreachable!(),
+                            };
+                        let mut field_type = None;
+                        for &(name, ref typ) in fields {
+                            if name == static_link_symbol {
+                                field_type = Some(typ);
+                            }
+                        }
+                        println!("************************************** Record field {:?}", field_type);
+                        field_type.expect("field type").clone()
+                    },
+                    _ => unreachable!("{:#?}", entry),
                 };
             // For a recursive call, we simply pass the current static link, which represents the stack
             // frame of the parent function.
+            println!("=================================== 0. Type for {:?} is {:?}", self.strings.get(static_link_symbol), typ);
             return (WithPos::dummy(Expr::Variable(WithPos::dummy(static_link_symbol))), Some(typ));
         }
 
@@ -1260,18 +1371,33 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             Some(Entry::Var { ref typ, .. }) => typ.clone(),
                             _ => unreachable!(),
                         };
+                    println!("=================================== 1. Type for {:?} is {:?}", self.strings.get(static_link_symbol), typ);
                     (WithPos::dummy(
                         Expr::Variable(WithPos::dummy(static_link_symbol)),
                     ), Some(typ))
                 },
                 _ => {
                     let mut data_layout = String::new();
+                    // TODO: put that in a function since it's duplicated above.
                     let typ =
-                        if let Some(Entry::Var { ref typ, .. }) = entry {
-                            typ
-                        }
-                        else {
-                            unreachable!();
+                        match entry {
+                            Some(Entry::Var { ref typ, .. }) => typ.clone(),
+                            Some(Entry::RecordField { ref record }) => {
+                                let fields =
+                                    match *record {
+                                        Type::Record { ref types, .. } => types,
+                                        _ => unreachable!(),
+                                    };
+                                let mut field_type = None;
+                                for &(name, ref typ) in fields {
+                                    if name == static_link_symbol {
+                                        field_type = Some(typ);
+                                    }
+                                }
+                                println!("************************************** Record field {:?}", field_type);
+                                field_type.expect("field type").clone()
+                            },
+                            _ => unreachable!("{:#?}", entry),
                         };
                     let mut types = vec![(static_link_symbol, typ.clone())];
                     data_layout.push('p');
@@ -1295,6 +1421,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         unique: Unique::new(),
                     };
                     self.env.enter_type(static_link_type_symbol, record_type.clone());
+                    println!("=================================== 3. Type for {:?} is {:?}", self.strings.get(static_link_symbol), record_type);
 
                     let mut fields = vec![];
                     fields.push(WithPos::dummy(RecordField {
@@ -1324,6 +1451,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     Some(Entry::Var { ref typ, .. }) => Some(typ.clone()),
                     _ => None,
                 };
+            println!("=================================== 4 Type for {:?} is {:?}", self.strings.get(static_link_symbol), typ);
 
             {
                 // We start at the parent level, because the static link contains variables from the
@@ -1340,6 +1468,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         if let Type::Record { types, .. } = typ.clone() {
                             for (ident, field_type) in types {
                                 if ident == static_link_symbol {
+                                    println!("=================================== 5 Type for {:?} is {:?}", self.strings.get(static_link_symbol), field_type);
                                     *typ = field_type;
                                 }
                             }
@@ -1550,8 +1679,6 @@ impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
                             });
                         }
                     }
-
-                    self.visit_var(&WithPos::dummy(var.ident));
                 }
             }
         }

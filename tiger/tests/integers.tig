@@ -2,11 +2,14 @@ let var n := 10
     var minus_n := -n
     var addition := n + 2 + minus_n
     var result := minus_n / addition
-in (
-    printi(10 / 2);
-    printi(minus_n);
-    printi(addition);
-    printi(result);
-    printi(200 - n * minus_n)
-)
+in
+    printi(10 / 2, pure function() =
+        printi(minus_n, pure function() =
+            printi(addition, pure function() =
+                printi(result, pure function() =
+                    printi(200 - n * minus_n, exit)
+                )
+            )
+        )
+    )
 end

@@ -74,7 +74,7 @@ extern fn chr(num: i64) -> *const c_char {
 }
 
 #[no_mangle]
-extern fn getchar() -> *const c_char {
+extern fn getchar(continuation: *const c_void) {
     let stdin = stdin();
     let char = stdin.bytes().next().expect("next char").expect("read stdin") as char;
 
@@ -88,15 +88,9 @@ extern fn getchar() -> *const c_char {
         let string_ptr = string_ptr.offset(1);
         *string_ptr = 0;
     }
-    string
-}
-
-#[no_mangle]
-extern fn getcharP(continuation: *const c_void) {
-    let char = getchar();
     unsafe {
         let function: fn(*const c_char, *const c_void) = mem::transmute(get_function_pointer(continuation));
-        function(char, continuation);
+        function(string, continuation);
     }
 }
 
@@ -146,17 +140,12 @@ extern fn initArray(length: usize, is_pointer: i64) -> i64 {
 }
 
 #[no_mangle]
-extern fn print(string: *const c_char) {
+extern fn print(string: *const c_char, continuation: *const c_void) {
     let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
     if let Ok(string) = cstring.to_str() {
         print!("{}", string);
     }
     let _ = stdout().flush();
-}
-
-#[no_mangle]
-extern fn printP(string: *const c_char, continuation: *const c_void) {
-    print(string);
     unsafe {
         let function: fn(*const c_void) = mem::transmute(get_function_pointer(continuation));
         function(continuation);
@@ -164,8 +153,12 @@ extern fn printP(string: *const c_char, continuation: *const c_void) {
 }
 
 #[no_mangle]
-extern fn printi(num: i32) {
+extern fn printi(num: i32, continuation: *const c_void) {
     println!("{}", num);
+    unsafe {
+        let function: fn(*const c_void) = mem::transmute(get_function_pointer(continuation));
+        function(continuation);
+    }
 }
 
 // Get the pointer where the string starts, i.e. after the data layout.

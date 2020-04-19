@@ -98,8 +98,32 @@ impl Type {
                 }
             },
             Nil => "nil".to_string(),
-            Record { name, .. } => format!("struct {}", symbols.name(name)),
-            StaticLink { .. } => "static link".to_string(),
+            Record { name, ref types, .. } => {
+                let mut string = format!("struct {} {{", symbols.name(name));
+                for &(ident, ref typ) in types {
+                     let ident = symbols.name(ident);
+                     string.push_str("    ");
+                     string.push_str(&ident);
+                     string.push_str(": ");
+                     string.push_str(&typ.show(symbols));
+                     string.push('\n');
+                }
+                string.push('}');
+                string
+            },
+            StaticLink { ref types, .. } => {
+                let mut string = "static link {\n".to_string();
+                for &(ident, ref typ) in types {
+                     let ident = symbols.name(ident);
+                     string.push_str("    ");
+                     string.push_str(&ident);
+                     string.push_str(": ");
+                     string.push_str(&typ.show(symbols));
+                     string.push('\n');
+                }
+                string.push('}');
+                string
+            },
             String => "string".to_string(),
             Unit => "()".to_string(),
             Error => "type error".to_string(),
