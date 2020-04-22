@@ -65,33 +65,25 @@ pub trait Visitor {
         }
     }
 
+    fn visit_closure(&mut self, body: &ExprWithPos) {
+        self.visit_exp(body);
+    }
+
     fn visit_exp(&mut self, expr: &ExprWithPos) {
         match expr.node {
             Expr::Array { ref init, ref size, .. } => {
                 self.visit_exp(size);
                 self.visit_exp(init);
             },
-            Expr::Assign { ref expr, ref var } => {
-                self.visit_exp(var);
-                self.visit_exp(expr);
-            },
-            Expr::Break => {
-            },
             Expr::Call { ref args, ref function } => {
                 self.visit_call(function, args);
             },
-            Expr::CallWithStaticLink { ref args, ref function } => {
-                self.visit_call(function, args);
-            },
-            Expr::Closure { ref body, .. } => {
-                self.visit_exp(body);
-            },
+            Expr::Closure { ref body, .. } => self.visit_closure(body),
             Expr::ClosureParamField { ref this, .. } =>
                 self.visit_exp(this),
-            Expr::DirectVariable(ref ident) => self.visit_var(ident),
             Expr::Field { ref this, .. } =>
                 self.visit_exp(this),
-            Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
+            Expr::ClosurePointer { .. } => (),
             Expr::FunctionPointerCall { ref args, ref function, .. } => {
                 self.visit_exp(function);
                 for arg in args {
@@ -148,10 +140,6 @@ pub trait Visitor {
                 self.visit_exp(expr);
             },
             Expr::Variable(ref ident) => self.visit_var(ident),
-            Expr::While { ref body, ref test } => {
-                self.visit_exp(test);
-                self.visit_exp(body);
-            },
         }
     }
 

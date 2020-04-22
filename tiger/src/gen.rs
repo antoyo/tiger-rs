@@ -113,7 +113,7 @@ pub fn outermost<F: Frame>() -> Level<F> {
 
 impl<F: Frame> Level<F> {
     pub fn new(parent: &Level<F>, name: Label, mut formals: Vec<bool>) -> Level<F> {
-        formals.push(true); // for the static link.
+        formals.push(true); // Since all functions are converted to closure, add a parameter for the closure.
         Level {
             current: Rc::new(RefCell::new(F::new(name, formals))),
             parent: Some(Box::new(parent.clone())),
@@ -167,16 +167,6 @@ pub fn field_access<F: Frame>(var: Exp, field_index: usize) -> Exp {
     }))
 }
 
-pub fn function_call(label: &Label, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp
-{
-    Call {
-        arguments,
-        collectable_return_type,
-        function_expr: Box::new(Name(label.clone())),
-        return_label: Label::new(),
-    }
-}
-
 pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp {
     Call {
         arguments,
@@ -184,13 +174,6 @@ pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collect
         function_expr: Box::new(function_pointer),
         return_label: Label::new(),
     }
-}
-
-pub fn goto(label: Label) -> Exp {
-    ExpSequence(
-        Box::new(Jump(Name(label.clone()), vec![label]).into()),
-        Box::new(unit()),
-    )
 }
 
 pub fn if_expression<F: Clone + Frame>(test_expr: Exp, if_expr: Exp, else_expr: Option<Exp>, level: &Level<F>) -> Exp {

@@ -50,13 +50,6 @@ impl<'a> Rewriter<'a> {
                     typ,
                 }, pos)
             },
-            Expr::Assign { expr, var } => {
-                WithPos::new(Expr::Assign {
-                    expr: Box::new(self.rewrite(*expr)),
-                    var: Box::new(self.rewrite(*var)),
-                }, pos)
-            },
-            Expr::Break => WithPos::new(Expr::Break, pos),
             Expr::Call { args, function } => {
                 let mut new_args = vec![];
                 let mut declarations = vec![];
@@ -83,12 +76,11 @@ impl<'a> Rewriter<'a> {
                     add_declarations(call, declarations, pos)
                 }
             },
-            Expr::CallWithStaticLink { .. } => unreachable!(),
-            Expr::Closure { body, params, pure, result } => {
+            Expr::Closure { body, name, params, result } => {
                 WithPos::new(Expr::Closure {
                     body: Box::new(self.rewrite(*body)),
+                    name,
                     params,
-                    pure,
                     result,
                 }, pos)
             },
@@ -103,16 +95,10 @@ impl<'a> Rewriter<'a> {
                     label,
                 }, pos)
             },
-            Expr::DirectVariable(_) => unreachable!(),
             Expr::Field { ident, this } => {
                 WithPos::new(Expr::Field {
                     ident,
                     this: Box::new(self.rewrite(*this)),
-                }, pos)
-            },
-            Expr::FunctionPointer { label } => {
-                WithPos::new(Expr::FunctionPointer {
-                    label,
                 }, pos)
             },
             Expr::FunctionPointerCall { args, closure_name, function } => {
@@ -256,13 +242,6 @@ impl<'a> Rewriter<'a> {
                 }, pos)
             },
             Expr::Variable(var) => WithPos::new(Expr::Variable(var), pos),
-            Expr::While { body, test } => {
-                // TODO: extract.
-                WithPos::new(Expr::While {
-                    body: Box::new(self.rewrite(*body)),
-                    test: Box::new(self.rewrite(*test)),
-                }, pos)
-            },
         }
     }
 

@@ -7,7 +7,7 @@ let type key = int
         right: tree
     }
 
-    pure function look(t: tree, k: key): binding =
+    function look(t: tree, k: key): binding =
         if t = nil then
             "<not-found>"
         else if k < t.key then
@@ -17,7 +17,7 @@ let type key = int
         else
             t.binding
 
-    pure function enter(t: tree, k: key, b: binding): tree =
+    function enter(t: tree, k: key, b: binding): tree =
         if t = nil then
             tree {
                 key = k,

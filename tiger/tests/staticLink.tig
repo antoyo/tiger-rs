@@ -2,7 +2,6 @@ let var n := 10
     var output := concat("Hello, ", "world\n")
     function test3() = (
         print(output);
-        output := concat("test3 ", output);
         printi(n)
     )
     function test() =
@@ -10,12 +9,10 @@ let var n := 10
             function test2() = (
                 print(output);
                 test3();
-                output := concat("test2 ", output);
                 printi(n);
                 printi(s)
             )
         in
-            output := concat("test ", output);
             printi(n);
             test2()
         end

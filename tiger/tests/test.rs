@@ -27,11 +27,8 @@ use std::process::{Command, Stdio};
 #[test]
 fn test_execution() {
     let files = [
-        "array",
-        "array_assignment",
         "comments",
         "conditions",
-        "cycle",
         "escapes",
         "functional",
         "functions",

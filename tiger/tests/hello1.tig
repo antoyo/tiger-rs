@@ -1,5 +1,5 @@
-print("Hello, World!\n", pure function() =
-    print("2\n", pure function() =
+print("Hello, World!\n", function() =
+    print("2\n", function() =
         printi(42, exit)
     )
 )

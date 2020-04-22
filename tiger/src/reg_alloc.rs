@@ -572,35 +572,35 @@ mod tests {
     fn interval() {
         let files = vec![
             ("tests/hello.tig", 0),
-            //("tests/integers.tig", 0),
-            ("tests/conditions.tig", 12),
+            ("tests/integers.tig", 2),
+            ("tests/conditions.tig", 4),
         ];
 
         let mut expected_intervals = HashMap::new();
         let mut expected_precolored_intervals = HashMap::new();
 
         let mut intervals = HashMap::new();
-        intervals.insert(34, vec![(10, 11), (20, usize::MAX)]);
-        intervals.insert(26, vec![(6, 16), (20, usize::MAX)]);
+        intervals.insert(31, vec![(10, 11), (20, usize::MAX)]);
+        intervals.insert(23, vec![(6, 16), (20, usize::MAX)]);
         expected_intervals.insert("tests/hello.tig", intervals);
         let mut intervals = HashMap::new();
         intervals.insert(2, vec![(0, usize::MAX)]);
         expected_precolored_intervals.insert("tests/hello.tig", intervals);
 
-        // TODO: uncomment when closures inside closures work.
-        /*let mut intervals = HashMap::new();
-        intervals.insert(69, vec![(26, 27), (65, usize::MAX)]);
-        intervals.insert(68, vec![(24, 25), (65, usize::MAX)]);
-        expected_intervals.insert("tests/integers.tig", intervals);*/
+        let mut intervals = HashMap::new();
+        intervals.insert(134, vec![(61, 63), (119, usize::MAX)]);
+        intervals.insert(129, vec![(46, 47), (119, usize::MAX)]);
+        expected_intervals.insert("tests/integers.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(40, vec![(19, 20), (23, 26), (164, usize::MAX)]);
+        intervals.insert(179, vec![(46, 47), (50, 52), (174, usize::MAX)]);
         expected_intervals.insert("tests/conditions.tig", intervals);
         let mut intervals = HashMap::new();
         intervals.insert(2, vec![(0, usize::MAX)]);
         expected_precolored_intervals.insert("tests/conditions.tig", intervals);
 
         for (filename, skip_count) in files {
+            println!("Filename: {}", filename);
             let (intervals, precolored_intervals) = get_intervals(filename, skip_count);
             let intervals: HashMap<_, _> = intervals.into_iter().collect();
 

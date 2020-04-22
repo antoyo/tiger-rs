@@ -86,12 +86,6 @@ impl EscapeFinder {
                 self.visit_exp(size, depth);
                 self.visit_exp(init, depth);
             },
-            Expr::Assign { ref expr, ref var } => {
-                self.visit_exp(var, depth);
-                self.visit_exp(expr, depth);
-            },
-            Expr::Break => {
-            },
             Expr::Closure { ref body, ref params, .. } => {
                 for param in params {
                     self.env.enter(param.node.name, DepthEscape {
@@ -107,7 +101,6 @@ impl EscapeFinder {
                     self.visit_exp(arg, depth);
                 }
             },
-            Expr::CallWithStaticLink { .. } => unreachable!(),
             Expr::ClosureParamField { ref ident, .. } | Expr::Field { ref ident, .. } | // TODO: does that make sense to look for the field here?
                 Expr::Variable(ref ident) => {
                 if let Some(ref mut var) = self.env.look_mut(ident.node) {
@@ -116,8 +109,7 @@ impl EscapeFinder {
                     }
                 }
             },
-            Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
-            Expr::DirectVariable(_) => unreachable!(),
+            Expr::ClosurePointer { .. } => (),
             Expr::FunctionPointerCall { ref args, .. } => {
                 for arg in args {
                     self.visit_exp(arg, depth);
@@ -171,10 +163,6 @@ impl EscapeFinder {
             Expr::Subscript { ref expr, ref this } => {
                 self.visit_exp(this, depth);
                 self.visit_exp(expr, depth);
-            },
-            Expr::While { ref body, ref test } => {
-                self.visit_exp(test, depth);
-                self.visit_exp(body, depth);
             },
         }
     }

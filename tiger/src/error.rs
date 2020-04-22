@@ -35,18 +35,6 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Debug)]
 pub enum Error {
-    Assign {
-        pos: Pos,
-    },
-    BreakOutsideLoop {
-        pos: Pos,
-    },
-    CannotAssignInPureFun {
-        pos: Pos,
-    },
-    CannotCallImpureFun {
-        pos: Pos,
-    },
     CannotIndex {
         pos: Pos,
         typ: Type,
@@ -80,9 +68,6 @@ pub enum Error {
     },
     Msg(String),
     Multi(Vec<Error>),
-    NoLoopInPureFun {
-        pos: Pos,
-    },
     NotARecord {
         pos: Pos,
         typ: Type,
@@ -138,25 +123,6 @@ impl Error {
         }
         eprint!("{}{}error: {}", terminal.bold(), terminal.red(), terminal.reset_color());
         match *self {
-            Assign { pos } => {
-                eprintln!("Can only assign to variable, field or array element{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            BreakOutsideLoop { pos } => {
-                eprintln!("Break statement used outside of loop{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-            },
-            CannotCallImpureFun { pos } => {
-                eprintln!("Cannot call impure functions in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            CannotAssignInPureFun { pos } => {
-                eprintln!("Cannot assign in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
             CannotIndex { pos, ref typ } => {
                 eprintln!("Cannot index value of type `{}`{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal)
@@ -191,11 +157,6 @@ impl Error {
             },
             Msg(ref string) => eprintln!("{}", string),
             Multi(_) => unreachable!(),
-            NoLoopInPureFun { pos } => {
-                eprintln!("Cannot use loops in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
             NotARecord { pos, ref typ } => {
                 eprintln!("Type `{}` is not a struct{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal);
@@ -228,6 +189,7 @@ impl Error {
             UnexpectedField { ref ident, pos, ref struct_name } => {
                 eprintln!("Unexpected field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
                 pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
             },
             UnexpectedToken { ref expected, pos, ref unexpected } => {
                 eprintln!("Unexpected token {}, expecting {}{}", unexpected, expected, terminal.end_bold());

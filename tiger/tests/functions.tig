@@ -10,11 +10,33 @@ let function maximum(a: int, b: int): int =
             b
     function sum10(a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int, i: int, j: int): int =
         a + b + c + d + e + f + g + h + i + j
-in (
-    printi(minimum(42, 24));
-    printi(maximum(42, 24));
-    printi(minimum(24, 42));
-    printi(maximum(24, 42));
-    printi(sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
-)
+
+    function intToString(i: int): string =
+        let function loop(acc: string, i: int): string =
+            if i = 0 then
+                acc
+            else
+                let var rest := i / 10
+                    var dig := i - rest * 10
+                    function doDigit(): string =
+                        concat(chr(dig + ord("0")), acc)
+                in
+                    loop(doDigit(), rest)
+                end
+        in
+            if i = 0 then
+                "0"
+            else if i < 0 then
+                concat("-", loop("", -i))
+            else
+                loop("", i)
+        end
+
+    var n1 := concat(intToString(minimum(42, 24)), "\n")
+    var n2 := concat(concat(n1, intToString(maximum(42, 24))), "\n")
+    var n3 := concat(concat(n2, intToString(minimum(24, 42))), "\n")
+    var n4 := concat(concat(n3, intToString(maximum(24, 42))), "\n")
+    var n5 := concat(concat(n4, intToString(sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))), "\n")
+in
+    print(n5, exit)
 end

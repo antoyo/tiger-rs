@@ -264,14 +264,6 @@ impl<F: Frame> Gen<F> {
             },
             Exp::BinOp { op: BinOp::Div, left: expr, right: box Exp::Const(num) } => {
                 let instruction = Instruction::Move {
-                    assembly: "mov 'd0, 0".to_string(),
-                    source: vec![],
-                    destination: vec![X86_64::rdx()],
-                    stack_destination: vec![],
-                    stack_source: vec![],
-                };
-                self.emit(instruction);
-                let instruction = Instruction::Move {
                     assembly: "mov 'd0, 's0".to_string(),
                     source: vec![self.munch_expression(*expr)],
                     destination: vec![X86_64::rax()],
@@ -284,6 +276,14 @@ impl<F: Frame> Gen<F> {
                     assembly: format!("mov 'd0, {}", num),
                     source: vec![],
                     destination: vec![immediate],
+                    stack_destination: vec![],
+                    stack_source: vec![],
+                };
+                self.emit(instruction);
+                let instruction = Instruction::Move {
+                    assembly: "cqo".to_string(),
+                    source: vec![X86_64::rax()],
+                    destination: vec![X86_64::rdx()],
                     stack_destination: vec![],
                     stack_source: vec![],
                 };
@@ -308,17 +308,17 @@ impl<F: Frame> Gen<F> {
             },
             Exp::BinOp { op: BinOp::Div, left: box Exp::Const(num), right: expr } => {
                 let instruction = Instruction::Move {
-                    assembly: "mov 'd0, 0".to_string(),
+                    assembly: format!("mov 'd0, {}", num),
                     source: vec![],
-                    destination: vec![X86_64::rdx()],
+                    destination: vec![X86_64::rax()],
                     stack_destination: vec![],
                     stack_source: vec![],
                 };
                 self.emit(instruction);
                 let instruction = Instruction::Move {
-                    assembly: format!("mov 'd0, {}", num),
-                    source: vec![],
-                    destination: vec![X86_64::rax()],
+                    assembly: "cqo".to_string(),
+                    source: vec![X86_64::rax()],
+                    destination: vec![X86_64::rdx()],
                     stack_destination: vec![],
                     stack_source: vec![],
                 };
@@ -546,17 +546,17 @@ impl<F: Frame> Gen<F> {
             },
             Exp::BinOp { op: BinOp::Div, left, right } => {
                 let instruction = Instruction::Move {
-                    assembly: "mov 'd0, 0".to_string(),
-                    source: vec![],
-                    destination: vec![X86_64::rdx()],
+                    assembly: "mov 'd0, 's0".to_string(),
+                    source: vec![self.munch_expression(*left)],
+                    destination: vec![X86_64::rax()],
                     stack_destination: vec![],
                     stack_source: vec![],
                 };
                 self.emit(instruction);
                 let instruction = Instruction::Move {
-                    assembly: "mov 'd0, 's0".to_string(),
-                    source: vec![self.munch_expression(*left)],
-                    destination: vec![X86_64::rax()],
+                    assembly: "cqo".to_string(),
+                    source: vec![X86_64::rax()],
+                    destination: vec![X86_64::rdx()],
                     stack_destination: vec![],
                     stack_source: vec![],
                 };

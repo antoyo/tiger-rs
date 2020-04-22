@@ -68,7 +68,6 @@ pub enum Entry<F: Clone + Frame> {
         escaping_vars: BTreeSet<ClosureField>,
         parameters: Vec<Type>,
         param_type_symbols: Vec<SymbolWithPos>,
-        pure: bool,
         result: Type,
         result_symbol: Option<SymbolWithPos>,
     },
@@ -106,8 +105,8 @@ impl<F: Clone + Frame> Env<F> {
             var_env,
         };
 
-        for (name, (param_types, return_type, pure)) in env.external_functions() {
-            env.add_function(name, param_types, return_type, pure);
+        for (name, (param_types, return_type)) in env.external_functions() {
+            env.add_function(name, param_types, return_type);
         }
 
         env.enter_type(answer_symbol, Type::Answer);
@@ -123,7 +122,7 @@ impl<F: Clone + Frame> Env<F> {
         env
     }
 
-    fn add_function(&mut self, name: &str, parameters: Vec<Type>, result: Type, pure: bool) {
+    fn add_function(&mut self, name: &str, parameters: Vec<Type>, result: Type) {
         let symbol = self.var_env.symbol(name);
         let entry = Entry::Fun {
             external: true,
@@ -133,7 +132,6 @@ impl<F: Clone + Frame> Env<F> {
             escaping_vars: BTreeSet::new(),
             parameters,
             param_type_symbols: vec![],
-            pure,
             result,
             result_symbol: None,
         };
@@ -195,25 +193,26 @@ impl<F: Clone + Frame> Env<F> {
         self.var_env.name(symbol)
     }
 
-    pub fn external_functions(&mut self) -> BTreeMap<&'static str, (Vec<Type>, Type, bool)> {
+    pub fn external_functions(&mut self) -> BTreeMap<&'static str, (Vec<Type>, Type)> {
         let mut functions = BTreeMap::new();
-        functions.insert("ord", (vec![Type::String], Type::Int, true));
-        functions.insert("chr", (vec![Type::Int], Type::String, true));
-        functions.insert("size", (vec![Type::String], Type::Int, true));
-        functions.insert("substring", (vec![Type::String, Type::Int, Type::Int], Type::String, true));
-        functions.insert("concat", (vec![Type::String, Type::String], Type::String, true));
-        functions.insert("not", (vec![Type::Int], Type::Int, true));
-        functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int, true));
+        functions.insert("ord", (vec![Type::String], Type::Int));
+        functions.insert("chr", (vec![Type::Int], Type::String));
+        functions.insert("size", (vec![Type::String], Type::Int));
+        functions.insert("substring", (vec![Type::String, Type::Int, Type::Int], Type::String));
+        functions.insert("concat", (vec![Type::String, Type::String], Type::String));
+        functions.insert("not", (vec![Type::Int], Type::Int));
+        functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int));
 
         let cont = Type::Name(WithPos::dummy(self.type_env.symbol("cont")), None);
-        functions.insert("printi", (vec![Type::Int, cont.clone()], Type::Answer, true));
-        functions.insert("print", (vec![Type::String, cont.clone()], Type::Answer, true));
-        functions.insert("flush", (vec![cont], Type::Answer, true));
-        functions.insert("getchar", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer, true));
-        functions.insert("exit", (vec![], Type::Answer, true));
+        functions.insert("debugInt", (vec![Type::Int], Type::Answer));
+        functions.insert("printi", (vec![Type::Int, cont.clone()], Type::Answer));
+        functions.insert("print", (vec![Type::String, cont.clone()], Type::Answer));
+        functions.insert("flush", (vec![cont], Type::Answer));
+        functions.insert("getchar", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer));
+        functions.insert("exit", (vec![], Type::Answer));
 
-        functions.insert("allocRecord", (vec![Type::Int], Type::Int, true));
-        functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int, true));
+        functions.insert("allocRecord", (vec![Type::Int], Type::Int));
+        functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int));
         functions
     }
 }

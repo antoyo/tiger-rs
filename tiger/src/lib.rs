@@ -153,6 +153,11 @@ extern fn print(string: *const c_char, continuation: *const c_void) {
 }
 
 #[no_mangle]
+extern fn debugInt(num: i32) {
+    println!("{}", num);
+}
+
+#[no_mangle]
 extern fn printi(num: i32, continuation: *const c_void) {
     println!("{}", num);
     unsafe {

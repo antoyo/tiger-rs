@@ -1,47 +1,47 @@
 let type intConsumer = int -> answer
 
-    pure function isDigit(s: string) : int =
+    function isDigit(s: string) : int =
         ord(s) >= ord("0") & ord(s) <= ord("9")
 
-    pure function getInt(done: intConsumer) =
-        let pure function nextDigit(accum: int) =
-            let pure function eatChar(dig: string) =
+    function getInt(done: intConsumer) =
+        let function nextDigit(accum: int) =
+            let function eatChar(dig: string) =
                 if isDigit(dig) then
                     nextDigit(accum * 10 + ord(dig) - ord("0"))
                 else
                     done(accum)
             in
-                getchar(pure function(char: string) = eatChar(char))
+                getchar(function(char: string) = eatChar(char))
             end
         in
             nextDigit(0)
         end
 
-    pure function putInt(i: int, c: cont) =
+    function putInt(i: int, c: cont) =
         if i = 0 then
             c()
         else
             let var rest := i / 10
                 var dig := i - rest * 10
-                pure function doDigit() =
+                function doDigit() =
                     print(chr(dig + ord("0")), c)
             in
-                putInt(rest, pure function() = doDigit())
+                putInt(rest, function() = doDigit())
             end
 
-    pure function factorial(i: int) : int =
+    function factorial(i: int) : int =
         if i = 0 then
             1
         else
             i * factorial(i - 1)
 
-    pure function loop(i: int) =
+    function loop(i: int) =
         if i > 12 then
             exit()
         else
-            let pure function ask() =
+            let function ask() =
                     getInt(loop)
-                pure function next() =
+                function next() =
                     print("\n", ask)
             in
                 putInt(factorial(i), next)

@@ -32,12 +32,35 @@ let type intfun = int -> int
 
     var closure := function(m: int) : int =
         m + 1
+
+    function intToString(i: int): string =
+        let function loop(acc: string, i: int): string =
+            if i = 0 then
+                acc
+            else
+                let var rest := i / 10
+                    var dig := i - rest * 10
+                    function doDigit(): string =
+                        concat(chr(dig + ord("0")), acc)
+                in
+                    loop(doDigit(), rest)
+                end
+        in
+            if i = 0 then
+                "0"
+            else if i < 0 then
+                concat("-", loop("", -i))
+            else
+                loop("", i)
+        end
+
+    var n1 := concat(intToString(addFive(10)), "\n")
+    var n2 := concat(concat(n1, intToString(closure(10))), "\n")
+    var n3 := concat(concat(n2, intToString(getClosure()(12))), "\n")
+    var n4 := concat(concat(n3, intToString(twenty)), "\n")
+    var n5 := concat(concat(n4, intToString(twentyTwo)), "\n")
+    var n6 := concat(concat(n5, intToString(addTen(2))), "\n")
+    var n7 := concat(concat(n6, intToString(addTwentyFour(seventeen))), "\n")
 in
-    printi(addFive(10));
-    printi(closure(10));
-    printi(getClosure()(12));
-    printi(twenty);
-    printi(twentyTwo);
-    printi(addTen(2));
-    printi(addTwentyFour(seventeen))
+    print(n7, exit)
 end
