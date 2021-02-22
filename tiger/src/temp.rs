@@ -111,7 +111,7 @@ impl TempMap {
 
     pub fn insert<F: Frame>(&mut self, access: &F::Access) {
         if let Some(temp) = access.as_temp() {
-            self.temps.insert(temp.clone());
+            self.temps.insert(*temp);
         }
         else if let Some(stack_location) = access.as_stack() {
             self.stack_vars.insert(stack_location);

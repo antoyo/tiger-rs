@@ -167,7 +167,7 @@ fn call<F: Clone + Frame + PartialEq>(function: Exp, mut arguments: Vec<Exp>, pa
         let frame = current_level.current.borrow();
         arguments.push(frame.exp(frame.formals().last().expect("static link").clone(), Exp::Temp(F::fp())));
     }
-    else if current_level.parent.as_ref().map(|level| &**level) == Some(parent_level) {
+    else if current_level.parent.as_deref() == Some(parent_level) {
         // When calling a function defined in the current frame, simply pass the current frame
         // pointer for the static link.
         arguments.push(Exp::Temp(F::fp()));
@@ -253,7 +253,7 @@ pub fn if_expression<F: Clone + Frame>(test_expr: Exp, if_expr: Exp, else_expr: 
                         Box::new(Sequence(
                             Box::new(_Statement::Label(false_label).into()),
                             Box::new(Sequence(
-                                Box::new(Move(result.clone(), else_expr.unwrap_or(unit())).into()),
+                                Box::new(Move(result.clone(), else_expr.unwrap_or_else(unit)).into()),
                                 Box::new(_Statement::Label(end_label).into()),
                             ).into()),
                         ).into()),
@@ -302,7 +302,7 @@ pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_exp
         };
     let sequence = ExpSequence(
         Box::new(Sequence(
-            Box::new(init.into()),
+            Box::new(init),
             Box::new(Move(loop_var, Const(0)).into()),
         ).into()),
         Box::new(while_loop(&Label::new(), test_expr, body)),
@@ -398,8 +398,8 @@ pub fn relational_oper<F: Clone + Frame>(op: Operator, left: Exp, right: Exp, le
         Box::new(Sequence(
             Box::new(CondJump {
                 op: to_ir_rel_op(op),
-                left: left,
-                right: right,
+                left,
+                right,
                 true_label: true_label.clone(),
                 false_label: false_label.clone(),
             }.into()),

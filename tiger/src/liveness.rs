@@ -56,11 +56,11 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_l
             let mut stack_set = BTreeSet::new();
             let mut set = BTreeSet::new();
             for &successor in node.successors() {
-                let in_set = live_in.entry(successor.index()).or_insert_with(|| BTreeSet::new());
+                let in_set = live_in.entry(successor.index()).or_insert_with(BTreeSet::new);
                 set.extend(in_set.clone());
 
                 if do_stack_live_analysis {
-                    let in_set = stack_live_in.entry(successor.index()).or_insert_with(|| BTreeSet::new());
+                    let in_set = stack_live_in.entry(successor.index()).or_insert_with(BTreeSet::new);
                     stack_set.extend(in_set.clone());
                 }
             }
@@ -70,13 +70,13 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_l
             }
 
             let mut set = node.uses.clone();
-            let out = live_out.entry(index).or_insert_with(|| BTreeSet::new());
+            let out = live_out.entry(index).or_insert_with(BTreeSet::new);
             set.extend(out.difference(&node.defines));
             live_in.insert(index, set);
 
             if do_stack_live_analysis {
                 let mut set = node.stack_uses.clone();
-                let out = stack_live_out.entry(index).or_insert_with(|| BTreeSet::new());
+                let out = stack_live_out.entry(index).or_insert_with(BTreeSet::new);
                 set.extend(out.difference(&node.stack_defines));
                 stack_live_in.insert(index, set);
             }
@@ -227,7 +227,7 @@ impl Interval {
     }
 
     fn insert_range(&mut self, first: usize, last: usize) {
-        let index = self.ranges.iter().position(|(range_first, _)| first < *range_first);
+        let index = self.ranges.iter().position(|&(range_first, _)| first < range_first);
         if let Some(index) = index {
             self.ranges.insert(index, (first, last));
         }

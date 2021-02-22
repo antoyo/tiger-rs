@@ -32,7 +32,8 @@
  * FIXME: escape analysis (tests/functions.tig) where argument are put in the frame.
  */
 
-#![allow(unknown_lints)]
+#![allow(unknown_lints, clippy::match_like_matches_macro)]
+#![deny(clippy::pattern_type_mismatch)]
 #![feature(box_patterns)]
 
 mod asm;
@@ -129,15 +130,15 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
             for (function_name, _) in env::external_functions() {
                 writeln!(file, "extern {}", function_name)?;
             }
-            writeln!(file, "")?;
+            writeln!(file)?;
 
             writeln!(file, "section .data")?;
             writeln!(file, "    align 2")?;
 
             for fragment in &fragments {
-                match fragment {
+                match *fragment {
                     Fragment::Function { .. } => (),
-                    Fragment::Str(label, string) => {
+                    Fragment::Str(ref label, ref string) => {
                         // NOTE: creating a useless data layout here so that heap-allocated strings
                         // are accessed the same way as static strings.
                         write!(file, "    {}: ", label)?;
@@ -147,7 +148,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         }
                         writeln!(file, "db {}, 0", to_nasm(string))?;
                     },
-                    Fragment::VTable { class, methods } => {
+                    Fragment::VTable { ref class, ref methods } => {
                         writeln!(file, "{}:", class)?;
                         if !methods.is_empty() {
                             let labels = methods.iter()
@@ -199,11 +200,11 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                 }
             }
 
-            writeln!(file, "")?;
+            writeln!(file)?;
 
             writeln!(file, "{}:", POINTER_MAP_NAME)?;
             for map in &pointer_map {
-                for (label, pointer_temps) in map {
+                for &(ref label, ref pointer_temps) in map {
                     writeln!(file, "    dq {}", label)?;
                     for temp_label in pointer_temps {
                         writeln!(file, "    dq {}", temp_label.to_label::<X86_64>())?;
@@ -218,25 +219,28 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                 .args(&["-f", "elf64", asm_output_path.to_str().expect("asm output path")])
                 .status();
 
-            if let Ok(return_code) = status {
-                if return_code.success() {
-                    let mut object_output_path = PathBuf::from(&filename);
-                    object_output_path.set_extension("o");
-                    let mut executable_output_path = PathBuf::from(&filename);
-                    executable_output_path.set_extension("");
-                    Command::new("ld")
-                        .args(&[
-                            "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o",
-                            executable_output_path.to_str().expect("executable output path"),
-                            "/usr/lib/Scrt1.o", "/usr/lib/crti.o", &format!("-L{}", get_gcc_lib_dir()?),
-                            "-L/usr/lib64/",
-                            object_output_path.to_str().expect("object output path"),
-                            "target/debug/libruntime.a", "-lpthread", "-ldl", "--no-as-needed", "-lc", "-lgcc", "--as-needed",
-                            "-lgcc_s", "--no-as-needed", "/usr/lib/crtn.o"
-                        ])
-                        .status()
-                        .expect("link");
-                }
+            match status {
+                Ok(return_code) => {
+                    if return_code.success() {
+                        let mut object_output_path = PathBuf::from(&filename);
+                        object_output_path.set_extension("o");
+                        let mut executable_output_path = PathBuf::from(&filename);
+                        executable_output_path.set_extension("");
+                        Command::new("ld")
+                            .args(&[
+                                "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o",
+                                executable_output_path.to_str().expect("executable output path"),
+                                "/usr/lib/Scrt1.o", "/usr/lib/crti.o", &format!("-L{}", get_gcc_lib_dir()?),
+                                "-L/usr/lib64/",
+                                object_output_path.to_str().expect("object output path"),
+                                "target/debug/libruntime.a", "-lpthread", "-ldl", "--no-as-needed", "-lc", "-lgcc", "--as-needed",
+                                "-lgcc_s", "--no-as-needed", "/usr/lib/crtn.o"
+                            ])
+                            .status()
+                            .expect("link");
+                    }
+                },
+                Err(error) => eprintln!("Error running nasm: {}", error),
             }
         }
         env.end_scope(); // TODO: move after the semantic analysis?
@@ -266,7 +270,7 @@ fn get_gcc_lib_dir() -> io::Result<String> {
         if file.metadata()?.is_dir() {
             return file.file_name().to_str()
                 .map(|str| format!("{}{}", directory, str))
-                .ok_or(io::ErrorKind::InvalidData.into());
+                .ok_or_else(|| io::ErrorKind::InvalidData.into());
         }
     }
     Err(io::ErrorKind::NotFound.into())

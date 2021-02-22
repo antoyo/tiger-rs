@@ -198,7 +198,7 @@ impl Allocator {
 
         let instructions = mem::replace(&mut self.instructions, vec![]);
         self.instructions = instructions.into_iter().enumerate()
-            .filter(|(index, _)| instructions_visited.contains(index))
+            .filter(|&(index, _)| instructions_visited.contains(&index))
             .map(|(_, instruction)| instruction)
             .collect();
         // TODO: find a better way to remove the unreachable code than doing the live interval
@@ -207,7 +207,7 @@ impl Allocator {
         let (intervals, precolored_intervals, _, temp_pointers) = live_intervals::<F>(flow_graph, &self.temp_map, true);
 
         for register in &mut self.registers {
-            if let Some(interval) = &precolored_intervals.get(&register.temp) {
+            if let Some(ref interval) = precolored_intervals.get(&register.temp) {
                 register.assign(interval);
             }
         }
@@ -226,7 +226,7 @@ impl Allocator {
 
     fn replace_allocation(&mut self) {
         for instruction in &mut self.instructions {
-            match instruction {
+            match *instruction {
                 Instruction::Label { .. } => (),
                 Instruction::Call { ref mut destination, ref mut source, .. } |
                     Instruction::Move { ref mut destination, ref mut source, .. } |
@@ -234,12 +234,12 @@ impl Allocator {
                     {
                         for destination in destination {
                             if let Some(allocation) = self.register_map.get(destination) {
-                                *destination = allocation.clone();
+                                *destination = *allocation;
                             }
                         }
                         for source in source {
                             if let Some(allocation) = self.register_map.get(source) {
-                                *source = allocation.clone();
+                                *source = *allocation;
                             }
                         }
                     },
@@ -273,7 +273,7 @@ impl Allocator {
         // Split the spilled temporaries.
         // This is important so that we do not assign both splits to the same register.
         for instruction in &mut instructions {
-            match instruction {
+            match *instruction {
                 Instruction::Call { ref mut destination, ref mut source, .. } | Instruction::Move { ref mut destination, ref mut source, .. } |
                     Instruction::Operation { ref mut destination, ref mut source, .. } =>
                     {
@@ -452,16 +452,11 @@ impl Register {
             let used_last = self.used_interval.get_last(i);
             let interval_first = interval.get_first(j);
             let interval_last = interval.get_last(j);
-            if used_first > interval_first && used_first < interval_last {
-                return true;
-            }
-            else if interval_first > used_first && interval_first < used_last {
-                return true;
-            }
-            else if used_last > interval_first && used_last < interval_last {
-                return true;
-            }
-            else if interval_last > used_first && interval_last < used_last {
+            if used_first > interval_first && used_first < interval_last ||
+                interval_first > used_first && interval_first < used_last ||
+                used_last > interval_first && used_last < interval_last ||
+                interval_last > used_first && interval_last < used_last
+            {
                 return true;
             }
             else if used_first < interval_first {

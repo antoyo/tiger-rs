@@ -230,7 +230,7 @@ impl Error {
                 highlight_line(pos, symbols, terminal)?;
             },
         }
-        eprintln!("");
+        eprintln!();
 
         Ok(())
     }

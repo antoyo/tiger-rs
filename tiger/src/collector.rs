@@ -172,7 +172,7 @@ impl Collector {
         let offset = self.grab_allocation_spot(size);
         self.allocated += size;
         unsafe {
-            let ptr = self.heap.as_ptr().offset(offset as isize) as *mut usize;
+            let ptr = self.heap.as_ptr().add(offset) as *mut usize;
 
             data_layout.write_repr(ptr);
             ptr as i64
@@ -224,7 +224,7 @@ impl Collector {
                         let mut ptr = pointer as *const usize;
                         unsafe {
                             let size = *ptr.offset(1);
-                            ptr = ptr.offset(ARRAY_DATA_LAYOUT_SIZE as isize);
+                            ptr = ptr.add(ARRAY_DATA_LAYOUT_SIZE);
                             let end = (ptr as usize + size) as *const usize; // NOTE: the size is the memory size, not the number of elements.
                             while ptr < end {
                                 self.dfs(*ptr);
@@ -268,7 +268,7 @@ impl Collector {
                     let mut ptr = pointer as *const usize;
                     unsafe {
                         let size = *ptr.offset(1);
-                        ptr = ptr.offset(ARRAY_DATA_LAYOUT_SIZE as isize);
+                        ptr = ptr.add(ARRAY_DATA_LAYOUT_SIZE);
                         let end = (ptr as usize + size) as *const usize; // NOTE: the size is the memory size, not the number of elements.
                         while ptr < end {
                             let pointer_value = *ptr;
@@ -313,10 +313,8 @@ impl Collector {
             self.heap_length + size <= self.heap.len();
         if !has_spot {
             for (&key, list) in &self.freelists {
-                if key > size {
-                    if !list.is_empty() {
-                        return true;
-                    }
+                if key > size && !list.is_empty() {
+                    return true;
                 }
             }
         }
@@ -447,7 +445,7 @@ fn class_field(ptr: usize, index: usize) -> usize {
 fn class_field_address(ptr: usize, index: usize) -> *const usize {
     let ptr = ptr as *const usize;
     unsafe {
-        ptr.offset((index + CLASS_DATA_LAYOUT_SIZE) as isize)
+        ptr.add(index + CLASS_DATA_LAYOUT_SIZE)
     }
 }
 
@@ -460,7 +458,7 @@ fn field(ptr: usize, index: usize) -> usize {
 fn field_address(ptr: usize, index: usize) -> *const usize {
     let ptr = ptr as *const usize;
     unsafe {
-        ptr.offset((index + RECORD_DATA_LAYOUT_SIZE) as isize)
+        ptr.add(index + RECORD_DATA_LAYOUT_SIZE)
     }
 }
 
@@ -503,7 +501,7 @@ fn size_of(ptr: usize) -> usize {
 fn rbp() -> usize {
     let result: usize;
     unsafe {
-        asm!("mov $0, rbp" : "=r"(result) : : : "intel")
+        llvm_asm!("mov $0, rbp" : "=r"(result) : : : "intel")
     }
     result
 }

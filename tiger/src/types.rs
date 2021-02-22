@@ -106,7 +106,7 @@ impl Type {
             Class { name, .. } => format!("class {}", symbols.name(name)),
             Int => "int".to_string(),
             Name(_, ref typ) => {
-                if let Some(typ) = typ {
+                if let Some(ref typ) = *typ {
                     typ.show(symbols)
                 }
                 else {

@@ -151,8 +151,8 @@ impl<'a, R: Read> Parser<'a, R> {
         let pos = pos.grow(init.pos);
 
         Ok(WithPos::new(Expr::Array {
-            init: init.clone(),
-            size: size.clone(),
+            init,
+            size,
             typ, // TODO: is this still necessary?
         }, pos))
     }
@@ -225,11 +225,8 @@ impl<'a, R: Read> Parser<'a, R> {
         eat!(self, OpenCurly);
 
         let mut declarations = vec![];
-        loop {
-            match self.peek()?.token {
-                Method | Var => declarations.push(self.dec()?),
-                _ => break,
-            }
+        while let Method | Var = self.peek()?.token {
+            declarations.push(self.dec()?);
         }
 
         let end_pos = eat!(self, CloseCurly);
@@ -455,11 +452,8 @@ impl<'a, R: Read> Parser<'a, R> {
     fn let_expr(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Let);
         let mut declarations = vec![self.dec()?];
-        loop {
-            match self.peek()?.token {
-                Class | Function | Type | Var => declarations.push(self.dec()?),
-                _ => break,
-            }
+        while let Class | Function | Type | Var = self.peek()?.token {
+            declarations.push(self.dec()?);
         }
         eat!(self, In, "class, function, in, type, var".to_string());
         let expr = self.expr()?;

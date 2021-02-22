@@ -748,7 +748,7 @@ impl<F: Frame> Gen<F> {
 
                 let instruction =
                     Instruction::Label {
-                        assembly: format!("{}:", return_label.clone()),
+                        assembly: format!("{}:", return_label),
                         label: return_label, // TODO: check if this is okay.
                     };
                 self.emit(instruction);

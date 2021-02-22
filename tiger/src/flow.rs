@@ -64,36 +64,36 @@ impl<'a> GraphBuilder<'a> {
 
         let instruction = &self.instructions[current_index];
         let return_label =
-            match instruction {
-                Instruction::Call { return_label, .. } => Some(return_label.clone()),
+            match *instruction {
+                Instruction::Call { ref return_label, .. } => Some(return_label.clone()),
                 _ => None,
             };
         let is_move =
-            match instruction {
+            match *instruction {
                 Instruction::Move { .. } => true,
                 _ => false,
             };
         let defines =
-            match instruction {
-                Instruction::Call { destination, .. } | Instruction::Move { destination, .. } | Instruction::Operation { destination, .. } =>
+            match *instruction {
+                Instruction::Call { ref destination, .. } | Instruction::Move { ref destination, .. } | Instruction::Operation { ref destination, .. } =>
                     destination.iter().cloned().collect(),
                 _ => BTreeSet::new(),
             };
         let uses =
-            match instruction {
-                Instruction::Call { source, .. } | Instruction::Move { source, .. } | Instruction::Operation { source, .. } =>
+            match *instruction {
+                Instruction::Call { ref source, .. } | Instruction::Move { ref source, .. } | Instruction::Operation { ref source, .. } =>
                     source.iter().cloned().collect(),
                 _ => BTreeSet::new(),
             };
         let stack_defines =
-            match instruction {
-                Instruction::Operation { stack_destination, .. } | Instruction::Move { stack_destination, .. } =>
+            match *instruction {
+                Instruction::Operation { ref stack_destination, .. } | Instruction::Move { ref stack_destination, .. } =>
                     stack_destination.iter().cloned().collect(),
                 _ => BTreeSet::new(),
             };
         let stack_uses =
-            match instruction {
-                Instruction::Move { stack_source, .. } | Instruction::Operation { stack_source, .. } =>
+            match *instruction {
+                Instruction::Move { ref stack_source, .. } | Instruction::Operation { ref stack_source, .. } =>
                     stack_source.iter().cloned().collect(),
                 _ => BTreeSet::new(),
             };
@@ -111,7 +111,7 @@ impl<'a> GraphBuilder<'a> {
         if let Some(predecessor) = predecessor {
             self.control_flow_graph.link(predecessor, entry);
         }
-        if let Instruction::Operation { ref assembly, ref jump, .. } = instruction {
+        if let Instruction::Operation { ref assembly, ref jump, .. } = *instruction {
             if let Some(ref jump) = *jump {
                 for jump in jump {
                     self.build(self.label_map[jump], Some(entry));
@@ -134,7 +134,7 @@ pub fn instructions_to_graph(instructions: &[Instruction]) -> FlowGraph {
     let mut label_map = HashMap::new();
 
     for (index, instruction) in instructions.iter().enumerate() {
-        if let Instruction::Label { ref label, .. } = instruction {
+        if let Instruction::Label { ref label, .. } = *instruction {
             label_map.insert(label.clone(), index);
         }
     }

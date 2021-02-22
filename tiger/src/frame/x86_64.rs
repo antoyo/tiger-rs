@@ -258,7 +258,7 @@ impl Frame for X86_64 {
     }
 
     fn special_name(temp: Temp) -> Option<&'static str> {
-        Self::temp_map().get(&temp).map(|&str| str)
+        Self::temp_map().get(&temp).copied()
     }
 
     fn fp() -> Temp {
@@ -386,9 +386,7 @@ impl Frame for X86_64 {
         // TODO: add comment to explain why rbp and rsp are added as destination.
         // Problably so that the register allocator does not use them.
         // FIXME: does not seem to work, though.
-        let mut destination = vec![];
-        destination.push(Self::rsp());
-        destination.push(Self::rbp());
+        let mut destination = vec![Self::rsp(), Self::rbp()];
         destination.extend(Self::callee_saved_registers());
         destination.extend(Self::arg_registers());
         let instruction = Instruction::Operation {

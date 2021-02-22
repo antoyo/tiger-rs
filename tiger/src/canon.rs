@@ -224,7 +224,7 @@ pub fn trace_schedule(mut basic_blocks: Vec<Vec<Statement>>, done_label: Label) 
                         }
 
                         new_statements.push(Statement {
-                            statement: _Statement::Jump(Exp::Name(label).into(), labels),
+                            statement: _Statement::Jump(Exp::Name(label), labels),
                             stack_var: statement.stack_var,
                         });
                     },
@@ -258,9 +258,9 @@ fn negate_condition(op: RelationalOp) -> RelationalOp {
 
 fn commute(expr1: &Statement, expr2: &Exp) -> bool {
     match (&expr1.statement, expr2) {
-        (_Statement::Exp(Exp::Const(_)), _) => true,
-        (_, Exp::Name(_)) => true,
-        (_, Exp::Const(_)) => true,
+        (&_Statement::Exp(Exp::Const(_)), _) => true,
+        (_, &Exp::Name(_)) => true,
+        (_, &Exp::Const(_)) => true,
         _ => false,
     }
 }
@@ -303,7 +303,7 @@ fn reorder(mut exprs: VecDeque<Exp>) -> (Statement, VecDeque<Exp>) {
         return (_Statement::Exp(Exp::Const(0)).into(), VecDeque::new());
     }
 
-    if let Exp::Call { .. } = exprs.front().expect("front") {
+    if let Exp::Call { .. } = *exprs.front().expect("front") {
         let temp = Temp::new();
         let function = exprs.pop_front().expect("pop front");
         exprs.push_front(Exp::ExpSequence(
@@ -477,8 +477,8 @@ fn do_expression(expr: Exp) -> (Statement, Exp) {
 
 fn append(statement1: Statement, statement2: Statement) -> Statement {
     match (&statement1.statement, &statement2.statement) {
-        (_Statement::Exp(Exp::Const(_)), _) => statement2,
-        (_, _Statement::Exp(Exp::Const(_))) => statement1,
+        (&_Statement::Exp(Exp::Const(_)), _) => statement2,
+        (_, &_Statement::Exp(Exp::Const(_))) => statement1,
         (_, _) => _Statement::Sequence(Box::new(statement1), Box::new(statement2)).into(),
     }
 }

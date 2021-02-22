@@ -19,7 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#![feature(asm)]
+#![feature(llvm_asm)]
 #![cfg(not(test))]
 
 /*
@@ -160,7 +160,7 @@ extern fn printi(num: i32) {
 fn string_offset(ptr: *const c_char) -> *const c_char {
     let ptr = ptr as *const usize;
     unsafe {
-        ptr.offset(STRING_DATA_LAYOUT_SIZE as isize) as *const c_char
+        ptr.add(STRING_DATA_LAYOUT_SIZE) as *const c_char
     }
 }
 

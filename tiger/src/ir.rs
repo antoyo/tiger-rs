@@ -55,7 +55,7 @@ impl From<_Statement> for Statement {
     fn from(statement: _Statement) -> Self {
         Self {
             stack_var: None,
-            statement: statement,
+            statement,
         }
     }
 }

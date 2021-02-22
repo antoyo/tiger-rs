@@ -207,7 +207,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
     fn check_int(&mut self, expr: &ExpTy, pos: Pos) {
         if expr.ty != Type::Int && expr.ty != Type::Error {
-            return self.add_error(Error::Type {
+            self.add_error(Error::Type {
                 expected: Type::Int,
                 pos,
                 unexpected: expr.ty.clone(),
@@ -217,7 +217,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
     fn check_function_types(&mut self, expected: &FunctionType, unexpected: &FunctionType, pos: Pos) {
         if expected != unexpected {
-            return self.add_error(Error::FunctionType {
+            self.add_error(Error::FunctionType {
                 expected: expected.clone(),
                 pos,
                 unexpected: unexpected.clone(),
@@ -256,10 +256,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             }
 
-            return self.add_error(Error::Type {
-                expected: expected.clone(),
+            self.add_error(Error::Type {
+                expected,
                 pos,
-                unexpected: unexpected.clone(),
+                unexpected,
             });
         }
     }
@@ -375,7 +375,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     _ => self.actual_ty(&exp.ty).is_pointer(),
                                 };
                             let typ =
-                                if let Some(ref typ) = typ {
+                                if let Some(ref typ) = *typ {
                                     let typ = self.get_type(typ, AddError);
                                     self.check_types(&typ, &exp.ty, init.pos);
                                     typ
@@ -532,13 +532,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             },
             Declaration::VariableDeclaration { ref init, name, ref typ, .. } => {
                 let exp = self.trans_exp(init, parent_level, done_label, true);
-                let is_collectable =
-                    if type_is_collectable(&exp.ty) {
-                        true
-                    }
-                    else {
-                        false
-                    };
+                let is_collectable = type_is_collectable(&exp.ty);
                 let escape = self.env.look_escape(name);
                 let access = gen::alloc_local(parent_level, escape || is_collectable); // TODO: check if this is necessary.
                 if escape {
@@ -647,13 +641,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 self.check_types(param, &exp.ty, arg.pos);
                                 expr_args.push(exp.exp);
                             }
-                            let collectable_return_type =
-                                if type_is_collectable(result) {
-                                    true
-                                }
-                                else {
-                                    false
-                                };
+                            let collectable_return_type = type_is_collectable(result);
                             let exp =
                                 if external {
                                     F::external_call(&label.to_name(), expr_args, collectable_return_type)
@@ -669,7 +657,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         _ => unreachable!(),
                     };
                 }
-                return self.undefined_function(function, expr.pos);
+                self.undefined_function(function, expr.pos)
             },
             Expr::Field { ref ident, ref this } => {
                 let var = self.trans_exp(this, level, done_label, true);
@@ -701,7 +689,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             pos: this.pos,
                             typ,
                         });
-                        return EXP_TYPE_ERROR;
+                        EXP_TYPE_ERROR
                     },
                 }
             },
@@ -776,13 +764,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             expr_args.push(exp.exp);
                         }
                         let result = &method_type.return_type;
-                        let collectable_return_type =
-                            if type_is_collectable(result) {
-                                true
-                            }
-                            else {
-                                false
-                            };
+                        let collectable_return_type = type_is_collectable(result);
                         let current_level = self.methods_level.get(&(class_method.class_name, method.node)).expect("level");
                         let exp = method_call(index, expr_args, level, current_level, collectable_return_type);
                         return ExpTy {
@@ -963,10 +945,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Variable(ref ident) => {
                 match self.env.look_var(ident.node).cloned() { // TODO: remove this clone.
                     Some(Entry::Var { ref access, ref typ, }) => {
-                        return ExpTy {
+                        ExpTy {
                             exp: simple_var(access.clone(), level),
                             ty: self.actual_ty(typ),
-                        };
+                        }
                     },
                     Some(Entry::ClassField { class }) => {
                         let fields =
@@ -1043,7 +1025,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn array_contains_pointer(&mut self, ty: &Type) -> bool {
-        match ty {
+        match *ty {
             Type::Array(ref typ, _) => typ.is_pointer(),
             Type::Error => false,
             _ => ty.is_pointer()
@@ -1080,7 +1062,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             }
 
-            if let Some(parent_class) = parent_class {
+            if let Some(ref parent_class) = *parent_class {
                 parent = self.get_type(parent_class, DontAddError);
             }
             else {
@@ -1097,7 +1079,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn duplicate_param(&mut self, param: &FieldWithPos) {
-        let ident = self.env.var_name(param.node.name).to_string();
+        let ident = self.env.var_name(param.node.name);
         self.add_error(Error::DuplicateParam {
             ident,
             pos: param.pos,
@@ -1141,7 +1123,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn undefined_function(&mut self, ident: Symbol, pos: Pos) -> ExpTy {
-        let ident = self.env.var_name(ident).to_string();
+        let ident = self.env.var_name(ident);
         self.add_error(Error::Undefined {
             ident,
             item: "function".to_string(),
@@ -1151,7 +1133,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn undefined_method(&mut self, ident: Symbol, pos: Pos) -> ExpTy {
-        let ident = self.env.var_name(ident).to_string();
+        let ident = self.env.var_name(ident);
         self.add_error(Error::Undefined {
             ident,
             item: "method".to_string(),
@@ -1171,7 +1153,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn undefined_variable(&mut self, ident: Symbol, pos: Pos) -> ExpTy {
-        let ident = self.env.var_name(ident).to_string();
+        let ident = self.env.var_name(ident);
         self.add_error(Error::Undefined {
             ident,
             item: "variable".to_string(),

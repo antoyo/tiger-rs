@@ -206,6 +206,7 @@ impl<R: Read> Lexer<R> {
         self.two_char_token(vec![('=', LesserOrEqual), ('>', NotEqual)], Lesser)
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn make_token(&self, token: Tok, length: usize) -> Result<Token> {
         if length > 10000 {
             panic!();
@@ -331,7 +332,7 @@ impl<R: Read> Lexer<R> {
         Ok(buffer)
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     pub fn token(&mut self) -> Result<Token> {
         if let Some(&Ok(ch)) = self.bytes_iter.peek() {
             return match ch {
