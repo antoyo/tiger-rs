@@ -21,6 +21,7 @@
 
 // TODO: use the list encoded in the code to navigate the stack instead of rbp?
 
+use std::arch::asm;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::CStr;
@@ -500,7 +501,7 @@ fn size_of(ptr: usize) -> usize {
 fn rbp() -> usize {
     let result: usize;
     unsafe {
-        llvm_asm!("mov $0, rbp" : "=r"(result) : : : "intel")
+        asm!("mov {result}, rbp", result = out(reg) result)
     }
     result
 }
