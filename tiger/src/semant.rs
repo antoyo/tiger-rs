@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2020 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2024 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -678,8 +678,8 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Call { ref args, ref function } => {
                 match function.node {
                     Expr::Variable(ref func) => {
-                        if let Some(entry@Entry::Fun { .. }) = self.env.look_var(func.node).cloned() { // TODO: remove this clone.
-                            if let Entry::Fun { external, ref label, ref parameters, ref result, level: ref current_level, pure, .. } = entry {
+                        match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
+                            Some(Entry::Fun { external, ref label, ref parameters, ref result, level: ref current_level, pure, .. }) => {
                                 if self.in_pure_fun && !pure {
                                     self.add_error(Error::CannotCallImpureFun {
                                         pos,
@@ -707,13 +707,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     else {
                                         function_call(label, expr_args, level, current_level, collectable_return_type, self.in_closure)
                                     };
-                                return ExpTy {
+                                ExpTy {
                                     exp,
                                     ty: self.actual_ty(result),
-                                };
-                            }
+                                }
+                            },
+                            Some(_) => self.closure_call(function, args, level, done_label),
+                            None => self.undefined_function(func.node, func.pos),
                         }
-                        self.closure_call(function, args, level, done_label)
                     },
                     _ => self.closure_call(function, args, level, done_label),
                 }
