@@ -58,11 +58,13 @@ fn test_execution() {
     ];
 
     let mut success = true;
+    let mut success_count = 0;
+    let mut failure_count = 0;
     for file in &files {
         print!("  Test {}... ", file);
         let _ = remove_file(format!("./tests/{}", file));
         Command::new("./target/debug/tiger")
-            .arg(&format!("tests/{}.tig", file))
+            .arg(format!("tests/{}.tig", file))
             .status()
             .expect("compile");
         let child = Command::new(format!("./tests/{}", file))
@@ -77,14 +79,18 @@ fn test_execution() {
         let read_size = child.stdout.expect("stdout").read_to_end(&mut buffer).expect("output");
         let output = String::from_utf8_lossy(&buffer[..read_size]);
         let expected_output = String::from_utf8(fs::read(format!("./tests/{}.stdout", file)).expect("read")).expect("String::from_utf8");
-        if output != &*expected_output {
+        if output != expected_output {
             success = false;
             println!(" FAIL");
+            failure_count += 1;
         }
         else {
             println!(" ok");
+            success_count += 1;
         }
     }
+
+    println!("\ntest result: {} passed, {} failed\n", success_count, failure_count);
 
     if !success {
         panic!();
