@@ -200,6 +200,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
 
             writeln!(file)?;
 
+            //writeln!(file, "    align 8")?;
             writeln!(file, "{}:", POINTER_MAP_NAME)?;
             for map in &pointer_map {
                 for &(ref label, ref pointer_temps) in map {
@@ -211,6 +212,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                 }
             }
             writeln!(file, "    dq {}", END_MARKER)?;
+            //writeln!(file, "    align 8")?;
             writeln!(file, "{}:", END_MARKER)?;
 
             let status = Command::new("nasm")

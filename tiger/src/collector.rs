@@ -416,17 +416,18 @@ fn fetch_pointer_map() -> HashMap<usize, Vec<Stack>> {
         let end_marker = &__tiger_pointer_map_end as *const _ as usize;
         let mut pointer = &__tiger_pointer_map as *const usize;
         loop {
+            let pointer_val = ptr::read_unaligned(pointer);
             let address =
-                if *pointer == end_marker {
+                if pointer_val == end_marker {
                     break;
                 }
                 else {
-                    *pointer
+                    pointer_val
                 };
             pointer = pointer.offset(1);
             let mut pointers = vec![];
-            while *pointer != end_marker {
-                pointers.push(Stack(*pointer as i64));
+            while ptr::read_unaligned(pointer) != end_marker {
+                pointers.push(Stack(ptr::read_unaligned(pointer) as i64));
                 pointer = pointer.offset(1);
             }
             pointer = pointer.offset(1);
