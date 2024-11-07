@@ -1,0 +1,2 @@
+As of November 7, I ran gc_test.sh up to Capacity 102687 without any failures.
+All the tests passed with rustc nightly 2024-11-06 (854980293)
