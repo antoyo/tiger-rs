@@ -40,6 +40,7 @@ use std::ffi::CStr;
 use std::io::{Read, Write, stdin, stdout};
 use std::mem;
 use std::os::raw::{c_char, c_void};
+use std::ptr;
 
 use collector::{Layout, GARBAGE_COLLECTOR};
 use data_layout::{RECORD_DATA_LAYOUT_SIZE, STRING_DATA_LAYOUT_SIZE};
@@ -183,7 +184,7 @@ fn string_offset(ptr: *const c_char) -> *const c_char {
 fn get_function_pointer(closure: *const c_void) -> fn() {
     let ptr = closure as *const usize;
     unsafe {
-        mem::transmute(*ptr.offset(RECORD_DATA_LAYOUT_SIZE as isize))
+        mem::transmute(ptr::read_unaligned(ptr.offset(RECORD_DATA_LAYOUT_SIZE as isize)))
     }
 }
 

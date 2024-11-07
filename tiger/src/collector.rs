@@ -218,16 +218,16 @@ impl Collector {
     fn dfs(&mut self, pointer: usize) {
         if self.in_heap(pointer) && !self.marks.contains(&pointer) {
             self.marks.insert(pointer);
-            match unsafe { *(pointer as *const usize) } {
+            match unsafe { ptr::read_unaligned(pointer as *const usize) } {
                 ARRAY_TYPE => {
                     if array_contains_pointers(pointer) {
                         let mut ptr = pointer as *const usize;
                         unsafe {
-                            let size = *ptr.offset(1);
+                            let size = ptr::read_unaligned(ptr.offset(1));
                             ptr = ptr.add(ARRAY_DATA_LAYOUT_SIZE);
                             let end = (ptr as usize + size) as *const usize; // NOTE: the size is the memory size, not the number of elements.
                             while ptr < end {
-                                self.dfs(*ptr);
+                                self.dfs(ptr::read_unaligned(ptr));
                                 ptr = ptr.offset(1);
                             }
                         }
@@ -262,16 +262,16 @@ impl Collector {
 
         self.marks.insert(pointer);
 
-        match unsafe { *(pointer as *const usize) } {
+        match unsafe { ptr::read_unaligned(pointer as *const usize) } {
             ARRAY_TYPE => {
                 if array_contains_pointers(pointer) {
                     let mut ptr = pointer as *const usize;
                     unsafe {
-                        let size = *ptr.offset(1);
+                        let size = ptr::read_unaligned(ptr.offset(1));
                         ptr = ptr.add(ARRAY_DATA_LAYOUT_SIZE);
                         let end = (ptr as usize + size) as *const usize; // NOTE: the size is the memory size, not the number of elements.
                         while ptr < end {
-                            let pointer_value = *ptr;
+                            let pointer_value = ptr::read_unaligned(ptr);
                             if self.in_heap(pointer_value) {
                                 locations.insert(ptr as usize, pointer_value);
                                 self.dfs_locations(pointer_value, locations);
@@ -406,7 +406,7 @@ impl Collector {
 fn array_contains_pointers(ptr: usize) -> bool {
     unsafe {
         let ptr = (ptr as *const usize).offset(2);
-        *ptr != 0
+        ptr::read_unaligned(ptr) != 0
     }
 }
 
@@ -439,7 +439,7 @@ fn fetch_pointer_map() -> HashMap<usize, Vec<Stack>> {
 
 fn class_field(ptr: usize, index: usize) -> usize {
     unsafe {
-        *class_field_address(ptr, index)
+        ptr::read_unaligned(class_field_address(ptr, index))
     }
 }
 
@@ -452,7 +452,7 @@ fn class_field_address(ptr: usize, index: usize) -> *const usize {
 
 fn field(ptr: usize, index: usize) -> usize {
     unsafe {
-        *field_address(ptr, index)
+        ptr::read_unaligned(field_address(ptr, index))
     }
 }
 
@@ -466,7 +466,7 @@ fn field_address(ptr: usize, index: usize) -> *const usize {
 fn record_layout(ptr: usize) -> Vec<u8> {
     unsafe {
         let ptr = (ptr as *const usize).offset(1); // Offset 0 is the type, offset 1 is the fields layout.
-        let string_ptr = string_offset(*ptr as *const c_char);
+        let string_ptr = string_offset(ptr::read_unaligned(ptr) as *const c_char);
         let cstring = CStr::from_ptr(string_ptr);
         cstring.to_bytes().to_vec()
     }
@@ -482,7 +482,7 @@ fn size_of(ptr: usize) -> usize {
         match *ptr {
             ARRAY_TYPE => {
                 let ptr = ptr.offset(1);
-                *ptr + ARRAY_DATA_LAYOUT_SIZE * WORD_SIZE
+                ptr::read_unaligned(ptr) + ARRAY_DATA_LAYOUT_SIZE * WORD_SIZE
             },
             CLASS_TYPE => {
                 (field_count(ptr as usize) + CLASS_DATA_LAYOUT_SIZE) * WORD_SIZE
@@ -492,7 +492,7 @@ fn size_of(ptr: usize) -> usize {
             },
             STRING_TYPE => {
                 let ptr = ptr.offset(1);
-                *ptr + STRING_DATA_LAYOUT_SIZE * WORD_SIZE
+                ptr::read_unaligned(ptr) + STRING_DATA_LAYOUT_SIZE * WORD_SIZE
             },
             typ => unreachable!("Invalid type: {}", typ),
         }
@@ -517,7 +517,10 @@ fn stack_return_addresses() -> Vec<StackAddresses> {
     let mut addresses = vec![];
     let mut rbp = rbp() as *const usize;
     unsafe {
-        while !rbp.is_null() {
+        // FIXME: this is probably not correct to have `!= 1` instead of `! … is.null()` (which was
+        // the previous code).
+        // => It does seem to work, though. Perhaps the value changed in the glibc?
+        while rbp as usize != 1 {
             let previous_rbp = *rbp;
             let return_address = *rbp.offset(1) as *const c_void;
             // NOTE: we forced Rust to produce frame pointers to get the whole stacktrace.
