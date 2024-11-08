@@ -1,0 +1,36 @@
+# TODO: Run cargo clippy.
+# TODO: Switch to stable Rust.
+
+name: CI
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        toolchain:
+          - nightly
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: sudo apt-get install nasm
+
+    - name: Setup Rust
+      run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+
+    - name: Compile
+      run: |
+        cd tiger
+        cargo build
+
+    - name: Test
+      run: |
+        cd tiger
+        cargo test
