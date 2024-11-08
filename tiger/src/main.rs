@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2020 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2024 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -64,9 +64,9 @@ mod types;
 mod visitor;
 
 use std::env::args;
-use std::fs::{File, read_dir};
-use std::io::{self, BufReader, Write};
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 
@@ -226,15 +226,17 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         object_output_path.set_extension("o");
                         let mut executable_output_path = PathBuf::from(&filename);
                         executable_output_path.set_extension("");
+                        let gcc_libgcc_dir = get_gcc_libgcc_dir()?;
+                        let gcc_librt_dir = get_gcc_librt_dir()?;
                         Command::new("ld")
                             .args(&[
-                                "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o",
+                                "-dynamic-linker", &format!("{}/ld-linux-x86-64.so.2", gcc_librt_dir), "-o",
                                 executable_output_path.to_str().expect("executable output path"),
-                                "/usr/lib/Scrt1.o", "/usr/lib/crti.o", &format!("-L{}", get_gcc_lib_dir()?),
-                                "-L/usr/lib64/",
+                                &format!("{}/Scrt1.o", gcc_librt_dir), &format!("{}/crti.o", gcc_librt_dir),
+                                &format!("-L{}", gcc_libgcc_dir), "-L/usr/lib64/",
                                 object_output_path.to_str().expect("object output path"),
                                 "target/debug/libruntime.a", "-lpthread", "-ldl", "--no-as-needed", "-lc", "-lgcc", "--as-needed",
-                                "-lgcc_s", "--no-as-needed", "/usr/lib/crtn.o"
+                                "-lgcc_s", "--no-as-needed", &format!("{}/crtn.o", gcc_librt_dir)
                             ])
                             .status()
                             .expect("link");
@@ -262,16 +264,31 @@ fn to_nasm(string: &str) -> String {
     result
 }
 
-fn get_gcc_lib_dir() -> io::Result<String> {
-    let directory = "/usr/lib64/gcc/x86_64-pc-linux-gnu/";
-    let files = read_dir(directory)?;
-    for file in files {
-        let file = file?;
-        if file.metadata()?.is_dir() {
-            return file.file_name().to_str()
-                .map(|str| format!("{}{}", directory, str))
-                .ok_or_else(|| io::ErrorKind::InvalidData.into());
-        }
+fn get_gcc_libgcc_dir() -> Result<String, Error> {
+    run_gcc_print_command("-print-libgcc-file-name")
+        .map_err(|error| Error::Msg(format!("Cannot find libgcc in /usr/lib required by the runtime: {}", error)))
+}
+
+fn get_gcc_librt_dir() -> Result<String, Error> {
+    run_gcc_print_command("-print-file-name=crti.o")
+        .map_err(|error| Error::Msg(format!("Cannot find libgcc in /usr/lib required by the runtime: {}", error)))
+}
+
+fn run_gcc_print_command(command: &str) -> Result<String, String> {
+    match Command::new("gcc")
+        .arg(command)
+        .output() {
+        Ok(output) => {
+            let path = String::from_utf8(output.stdout)
+                .map_err(|error| error.to_string())?;
+            let path = path.trim();
+            let path = Path::new(path);
+            let parent = path.parent()
+                .ok_or_else(|| format!("Cannot get parent directory of {}", path.display()))?;
+            let parent_path = parent.to_str()
+                .ok_or_else(|| "Cannot convert gcc lib directory to UTF-8".to_string())?;
+            Ok(parent_path.to_string())
+        },
+        Err(error) => Err(error.to_string()),
     }
-    Err(io::ErrorKind::NotFound.into())
 }
