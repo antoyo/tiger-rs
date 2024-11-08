@@ -32,7 +32,7 @@
  * FIXME: escape analysis (tests/functions.tig) where argument are put in the frame.
  */
 
-#![allow(unknown_lints, clippy::match_like_matches_macro)]
+#![allow(unknown_lints, clippy::match_like_matches_macro, clippy::needless_borrowed_reference)]
 #![deny(clippy::pattern_type_mismatch)]
 #![feature(box_patterns)]
 
@@ -216,7 +216,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
             writeln!(file, "{}:", END_MARKER)?;
 
             let status = Command::new("nasm")
-                .args(&["-f", "elf64", asm_output_path.to_str().expect("asm output path")])
+                .args(["-f", "elf64", asm_output_path.to_str().expect("asm output path")])
                 .status();
 
             match status {
@@ -229,7 +229,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         let gcc_libgcc_dir = get_gcc_libgcc_dir()?;
                         let gcc_librt_dir = get_gcc_librt_dir()?;
                         Command::new("ld")
-                            .args(&[
+                            .args([
                                 "-dynamic-linker", &format!("{}/ld-linux-x86-64.so.2", gcc_librt_dir), "-o",
                                 executable_output_path.to_str().expect("executable output path"),
                                 &format!("{}/Scrt1.o", gcc_librt_dir), &format!("{}/crti.o", gcc_librt_dir),

@@ -271,14 +271,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
-    fn closure_call(&mut self, expr: &ExprWithPos, args: &Vec<ExprWithPos>, level: &Level<F>, done_label: Option<Label>) -> ExpTy {
+    fn closure_call(&mut self, expr: &ExprWithPos, args: &[ExprWithPos], level: &Level<F>, done_label: Option<Label>) -> ExpTy {
         let closure_name = self.symbols.unnamed();
         let pos = expr.pos;
         let closure_symbol = self.symbols.symbol(CLOSURE_FIELD);
         self.env.enter_escape(closure_name, false); // This variable does not escape, because it cannot be used by the user. It's only used here.
         self.trans_exp(&WithPos::new(Expr::Let {
             body: Box::new(WithPos::new(Expr::FunctionPointerCall {
-                args: args.clone(),
+                args: args.to_vec(),
                 closure_name,
                 function: Box::new(WithPos::new(Expr::ClosureParamField {
                     ident: WithPos::new(closure_symbol, pos),
@@ -331,7 +331,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 };
                 self.env.enter_type(name.node, empty_class_type);
 
-                let old_escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
+                let old_escaping_vars = mem::take(&mut self.escaping_vars);
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
 
                 let mut pending_methods = vec![];
@@ -359,7 +359,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     param_types.push(self.get_type(&param.node.typ, AddError));
                                     param_names.push(param.node.name);
                                     if !param_set.insert(param.node.name) {
-                                        self.duplicate_param(&param);
+                                        self.duplicate_param(param);
                                     }
                                 }
                                 let return_type =
@@ -465,7 +465,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let exp = self.trans_exp(body, &method.level, done_label.clone(), true);
                     self.check_types(&method.return_type, &exp.ty, body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
+                    let escaping_vars = mem::take(&mut self.escaping_vars);
                     self.gen.proc_entry_exit(&method.level, exp.exp, current_temp_map, escaping_vars);
                     self.env.end_scope();
                 }
@@ -482,7 +482,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             },
             Declaration::Function(ref declarations) => {
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                let old_escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
+                let old_escaping_vars = mem::take(&mut self.escaping_vars);
                 let mut levels = vec![];
                 for &WithPos { node: FuncDeclaration { ref body, ref name, ref params, pure, ref result, .. }, .. } in declarations {
                     let func_name = name.node;
@@ -513,7 +513,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     }
                     levels.push(level.clone());
 
-                    let env_fields = find_closure_environment(body, &self.env, level.clone());
+                    let env_fields = find_closure_environment(body, self.env, level.clone());
 
                     self.env.enter_var(func_name, Entry::Fun {
                         access_outside_vars: !env_fields.is_empty(),
@@ -527,7 +527,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
 
                 let old_in_pure_fun = self.in_pure_fun;
-                for (&WithPos { node: FuncDeclaration { ref params, ref body, pure, ref result, .. }, .. }, ref level) in
+                for (&WithPos { node: FuncDeclaration { ref params, ref body, pure, ref result, .. }, .. }, level) in
                     declarations.iter().zip(&levels)
                 {
                     self.in_pure_fun = pure;
@@ -554,8 +554,8 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let exp = self.trans_exp(body, level, done_label.clone(), true);
                     self.check_types(&result_type, &exp.ty, body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
-                    self.gen.proc_entry_exit(&level, exp.exp, current_temp_map, escaping_vars);
+                    let escaping_vars = mem::take(&mut self.escaping_vars);
+                    self.gen.proc_entry_exit(level, exp.exp, current_temp_map, escaping_vars);
                     self.env.end_scope();
                 }
                 self.in_pure_fun = old_in_pure_fun;
@@ -734,7 +734,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let func_level = Level::new(level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
                 let closure_level = func_level.formals().last().expect("closure access").0.clone();
 
-                let env_fields = find_closure_environment(body, &self.env, closure_level);
+                let env_fields = find_closure_environment(body, self.env, closure_level);
 
                 let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
 
@@ -783,7 +783,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 {
                     let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let old_escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
+                    let old_escaping_vars = mem::take(&mut self.escaping_vars);
                     let old_in_closure = self.in_closure;
                     self.in_closure = true;
 
@@ -823,7 +823,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let exp = self.trans_exp(&function.body, &func_level, done_label.clone(), true);
                     self.check_types(&result_type, &exp.ty, function.body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::replace(&mut self.escaping_vars, vec![]);
+                    let escaping_vars = mem::take(&mut self.escaping_vars);
                     self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_vars);
                     self.env.end_scope();
 
@@ -880,7 +880,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     pos: this.pos,
                     typ: var.ty,
                 });
-                return EXP_TYPE_ERROR;
+                EXP_TYPE_ERROR
             },
             Expr::Field { ref ident, ref this } => {
                 let var = self.trans_exp(this, level, done_label, true);
@@ -907,7 +907,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         }
                         self.unexpected_field(ident, ident.pos, record_type)
                     },
-                    Type::Error => return EXP_TYPE_ERROR,
+                    Type::Error => EXP_TYPE_ERROR,
                     typ => {
                         self.add_error(Error::NotARecordOrClass {
                             pos: this.pos,
@@ -939,13 +939,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         Type::Error => return EXP_TYPE_ERROR,
                         _ => return self.not_callable(&function.ty, pos),
                     };
-                let collectable_return_type =
-                    if type_is_collectable(result) {
-                        true
-                    }
-                    else {
-                        false
-                    };
+                let collectable_return_type = type_is_collectable(result);
 
                 let mut expr_args = vec![];
                 if parameters.len() != args.len() {
@@ -975,7 +969,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let (else_expr, ty) =
                     match *else_ {
                         Some(ref else_) => {
-                            let else_expr = self.trans_exp(&else_, level, done_label, true);
+                            let else_expr = self.trans_exp(else_, level, done_label, true);
                             self.check_types(&if_expr.ty, &else_expr.ty, else_.pos);
                             (Some(else_expr), if_expr.ty)
                         },
@@ -1133,7 +1127,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     if type_field_name == field.node.ident {
                                         found = true;
                                         let field_expr = self.trans_exp(&field.node.expr, level, done_label.clone(), true);
-                                        self.check_types(&type_field, &field_expr.ty, field.node.expr.pos);
+                                        self.check_types(type_field, &field_expr.ty, field.node.expr.pos);
                                         field_exprs.push(field_expr.exp);
                                     }
                                 }
@@ -1555,7 +1549,7 @@ impl Eq for ClosureField {
 
 impl PartialOrd for ClosureField {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.ident.partial_cmp(&other.ident)
+        Some(self.cmp(other))
     }
 }
 
@@ -1581,11 +1575,12 @@ impl<'a, F: Frame> EnvFinder<'a, F> {
     }
 }
 
+#[allow(clippy::needless_lifetimes)]
 impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
     fn visit_var(&mut self, ident: &SymbolWithPos) {
         // TODO: panic if trying to access a var from static link?
         // TODO: support class field as well?
-        if let Some(Entry::Var { ref access, ref typ, }) = self.env.look_var(ident.node) {
+        if let Some(&Entry::Var { ref access, ref typ, }) = self.env.look_var(ident.node) {
             if self.closure_level.current != access.0.current {
                 self.fields.insert(ClosureField {
                     ident: ident.node,

@@ -121,6 +121,8 @@ use ir::{Exp, _Statement};
 use liveness::{Interval, StackLocation, live_intervals};
 use temp::{Label, Temp, TempMap};
 
+use crate::liveness::LiveIntervals;
+
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Pointer(i64);
 
@@ -130,10 +132,17 @@ impl Pointer {
     }
 }
 
+struct IntervalAnalysis {
+    intervals: Vec<(Temp, Interval)>,
+    #[cfg(test)]
+    precolored_intervals: HashMap<Temp, Interval>,
+    temp_pointers: Vec<(Label, BTreeSet<StackLocation>)>,
+}
+
 pub fn alloc<F: Frame>(instructions: Vec<Instruction>, frame: &mut F, temp_map: TempMap) -> (Vec<Instruction>, Vec<(Label, Vec<Pointer>)>) {
     let mut allocator = Allocator::new::<F>(instructions, temp_map);
     //allocator.spill_weight_calculation();
-    let (intervals, _, temp_pointers) = allocator.live_interval_analysis::<F>();
+    let IntervalAnalysis { intervals, temp_pointers, .. } = allocator.live_interval_analysis::<F>();
     allocator.create_priority_queue(intervals);
     allocator.register_assignment();
     allocator.spill(frame);
@@ -157,8 +166,8 @@ struct Allocator {
 impl Allocator {
     fn new<F: Frame>(instructions: Vec<Instruction>, temp_map: TempMap) -> Self {
         let mut registers: Vec<_> = F::temp_map()
-            .into_iter()
-            .map(|(temp, _)| Register::new(temp, Interval::empty(temp)))
+            .into_keys()
+            .map(|temp| Register::new(temp, Interval::empty(temp)))
             .collect();
         registers.sort_by_key(|register| register.temp);
 
@@ -191,12 +200,12 @@ impl Allocator {
         self.priority_queue.extend(live_intervals.into_iter().map(|(_, interval)| interval));
     }
 
-    fn live_interval_analysis<F: Frame>(&mut self) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>, Vec<(Label, BTreeSet<StackLocation>)>) {
+    fn live_interval_analysis<F: Frame>(&mut self) -> IntervalAnalysis {
         let flow_graph = instructions_to_graph(&self.instructions);
 
-        let (_, _, instructions_visited, _) = live_intervals::<F>(flow_graph, &self.temp_map, false);
+        let LiveIntervals { instructions_visited, .. } = live_intervals::<F>(flow_graph, &self.temp_map, false);
 
-        let instructions = mem::replace(&mut self.instructions, vec![]);
+        let instructions = mem::take(&mut self.instructions);
         self.instructions = instructions.into_iter().enumerate()
             .filter(|&(index, _)| instructions_visited.contains(&index))
             .map(|(_, instruction)| instruction)
@@ -204,14 +213,19 @@ impl Allocator {
         // TODO: find a better way to remove the unreachable code than doing the live interval
         // analysis twice (because it's slow).
         let flow_graph = instructions_to_graph(&self.instructions);
-        let (intervals, precolored_intervals, _, temp_pointers) = live_intervals::<F>(flow_graph, &self.temp_map, true);
+        let LiveIntervals  { intervals, precolored_intervals, temp_pointers, .. } = live_intervals::<F>(flow_graph, &self.temp_map, true);
 
         for register in &mut self.registers {
-            if let Some(ref interval) = precolored_intervals.get(&register.temp) {
+            if let Some(interval) = precolored_intervals.get(&register.temp) {
                 register.assign(interval);
             }
         }
-        (intervals, precolored_intervals, temp_pointers)
+        IntervalAnalysis {
+            intervals,
+            #[cfg(test)]
+            precolored_intervals,
+            temp_pointers,
+        }
     }
 
     fn register_assignment(&mut self) {
@@ -268,7 +282,7 @@ impl Allocator {
         }
         let mut gen = Gen::<F>::new();
 
-        let mut instructions = mem::replace(&mut self.instructions, vec![]);
+        let mut instructions = mem::take(&mut self.instructions);
 
         // Split the spilled temporaries.
         // This is important so that we do not assign both splits to the same register.
@@ -332,7 +346,7 @@ impl Allocator {
                         gen.emit(instruction);
                         for (destination_index, destination) in destination.iter().enumerate() {
                             if self.spill_temps.contains_key(self.split_to_spill.get(destination).unwrap_or(destination)) {
-                                let original_spill = self.split_to_spill[&destination];
+                                let original_spill = self.split_to_spill[destination];
                                 // Spill after def.
                                 let mut offset = None;
                                 if let Exp::Mem(ref mem) = memory[&original_spill] {
@@ -372,13 +386,13 @@ impl Allocator {
     fn replace_temp_map(&self, temp_map: Vec<(Label, BTreeSet<StackLocation>)>) -> Vec<(Label, Vec<Pointer>)> {
         let mut pointer_temps = vec![];
         for (label, locations) in temp_map {
-            let new_temps = locations.iter().map(|location| {
+            let new_temps = locations.iter().flat_map(|location| {
                 match *location {
                     StackLocation(stack) => {
                         vec![Pointer(stack)]
                     },
                 }
-            }).flatten().collect();
+            }).collect();
             pointer_temps.push((label, new_temps));
         }
         pointer_temps
@@ -498,13 +512,13 @@ mod tests {
     use liveness::Interval;
     use parser::Parser;
     use semant::SemanticAnalyzer;
-    use super::{Allocator, Register};
+    use super::{Allocator, IntervalAnalysis, Register};
     use symbol::{Strings, Symbols};
     use temp::Temp;
 
     fn get_intervals(filename: &str) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>) {
         let strings = Rc::new(Strings::new());
-        let file = BufReader::new(File::open(&filename).expect("file open"));
+        let file = BufReader::new(File::open(filename).expect("file open"));
         let mut symbols = Symbols::new(Rc::clone(&strings));
         let file_symbol = symbols.symbol("no_file");
         let lexer = Lexer::new(file, file_symbol);
@@ -534,7 +548,7 @@ mod tests {
                         let instructions = frame.proc_entry_exit2(instructions, escaping_vars);
 
                         let mut allocator = Allocator::new::<X86_64>(instructions, temp_map);
-                        let (intervals, precolored_intervals, _) = allocator.live_interval_analysis::<X86_64>();
+                        let IntervalAnalysis { intervals, precolored_intervals, .. } = allocator.live_interval_analysis::<X86_64>();
 
                         return (intervals, precolored_intervals);
                     },
@@ -559,24 +573,24 @@ mod tests {
         let mut expected_precolored_intervals = HashMap::new();
 
         let mut intervals = HashMap::new();
-        intervals.insert(29, vec![(12, 12), (23, usize::max_value())]);
-        intervals.insert(30, vec![(8, 9), (23, usize::max_value())]);
-        intervals.insert(31, vec![(13, 14), (23, usize::max_value())]);
+        intervals.insert(29, vec![(12, 12), (23, usize::MAX)]);
+        intervals.insert(30, vec![(8, 9), (23, usize::MAX)]);
+        intervals.insert(31, vec![(13, 14), (23, usize::MAX)]);
         expected_intervals.insert("tests/hello.tig", intervals);
         let mut intervals = HashMap::new();
-        intervals.insert(2, vec![(0, usize::max_value())]);
+        intervals.insert(2, vec![(0, usize::MAX)]);
         expected_precolored_intervals.insert("tests/hello.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(66, vec![(20, 21), (83, usize::max_value())]);
-        intervals.insert(65, vec![(21, 23), (83, usize::max_value())]);
+        intervals.insert(66, vec![(20, 21), (83, usize::MAX)]);
+        intervals.insert(65, vec![(21, 23), (83, usize::MAX)]);
         expected_intervals.insert("tests/integers.tig", intervals);
 
         let mut intervals = HashMap::new();
-        intervals.insert(106, vec![(19, 20), (23, 26), (203, usize::max_value())]);
+        intervals.insert(106, vec![(19, 20), (23, 26), (203, usize::MAX)]);
         expected_intervals.insert("tests/conditions.tig", intervals);
         let mut intervals = HashMap::new();
-        intervals.insert(2, vec![(0, usize::max_value())]);
+        intervals.insert(2, vec![(0, usize::MAX)]);
         expected_precolored_intervals.insert("tests/conditions.tig", intervals);
 
         for filename in files {
@@ -608,18 +622,18 @@ mod tests {
         assert_eq!(register.used_interval.ranges, vec![(0, 0), (9, 26), (27, 27)]);
 
         let mut interval = Interval::empty(Temp::from_num(6));
-        interval.ranges = vec![(0, 0), (27, 27), (42, usize::max_value())];
+        interval.ranges = vec![(0, 0), (27, 27), (42, usize::MAX)];
         let mut register = Register::new(Temp::from_num(6), interval);
         let mut interval = Interval::empty(Temp::from_num(22));
-        interval.ranges = vec![(9, 26), (42, usize::max_value())];
+        interval.ranges = vec![(9, 26), (42, usize::MAX)];
         register.assign(&interval);
-        assert_eq!(register.used_interval.ranges, vec![(0, 0), (9, 26), (27, 27), (42, usize::max_value())]);
+        assert_eq!(register.used_interval.ranges, vec![(0, 0), (9, 26), (27, 27), (42, usize::MAX)]);
 
         let mut interval = Interval::empty(Temp::from_num(6));
-        interval.ranges = vec![(0, usize::max_value())];
+        interval.ranges = vec![(0, usize::MAX)];
         let register = Register::new(Temp::from_num(1), interval);
         let mut interval = Interval::empty(Temp::from_num(2));
-        interval.ranges = vec![(0, 0), (3, 3), (8, 8), (14, 14), (20, 21), (21, 21), (27, 27), (35, usize::max_value())];
+        interval.ranges = vec![(0, 0), (3, 3), (8, 8), (14, 14), (20, 21), (21, 21), (27, 27), (35, usize::MAX)];
         assert!(register.conflict(&interval));
     }
 }

@@ -151,7 +151,7 @@ impl<R: Read> Lexer<R> {
                 't' => '\t',
                 '\\' => '\\',
                 '"' => '"',
-                ch if ch.is_digit(10) => return self.escape_ascii_code(pos),
+                ch if ch.is_ascii_digit() => return self.escape_ascii_code(pos),
                 escape => {
                     pos.length = 2;
                     return Err(InvalidEscape {

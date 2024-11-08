@@ -23,6 +23,7 @@ use position::WithPos;
 use symbol::{Symbol, SymbolWithPos};
 use temp::Label;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
     ClassDeclaration {

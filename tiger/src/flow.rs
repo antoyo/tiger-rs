@@ -33,7 +33,8 @@ pub struct Node {
     pub stack_uses: BTreeSet<i64>,
     pub uses: BTreeSet<Temp>,
     pub return_label: Option<Label>,
-    pub is_move: bool,
+    // TODO: This field is unused. Check out if it's really not needed.
+    //pub is_move: bool,
 }
 
 pub struct FlowGraph {
@@ -53,6 +54,7 @@ struct GraphBuilder<'a> {
     visited: HashMap<usize, Entry>,
 }
 
+#[allow(clippy::needless_lifetimes)]
 impl<'a> GraphBuilder<'a> {
     fn build(&mut self, current_index: usize, predecessor: Option<Entry>) {
         if let Some(&entry) = self.visited.get(&current_index) {
@@ -68,11 +70,12 @@ impl<'a> GraphBuilder<'a> {
                 Instruction::Call { ref return_label, .. } => Some(return_label.clone()),
                 _ => None,
             };
-        let is_move =
+        // TODO: This is unused. Check out if it's really not needed.
+        /*let is_move =
             match *instruction {
                 Instruction::Move { .. } => true,
                 _ => false,
-            };
+            };*/
         let defines =
             match *instruction {
                 Instruction::Call { ref destination, .. } | Instruction::Move { ref destination, .. } | Instruction::Operation { ref destination, .. } =>
@@ -104,7 +107,7 @@ impl<'a> GraphBuilder<'a> {
             stack_defines,
             stack_uses,
             uses,
-            is_move,
+            //is_move,
         };
         let entry = self.control_flow_graph.insert(node);
         self.visited.insert(current_index, entry);

@@ -20,7 +20,6 @@
  */
 
 use std::fmt::{self, Display, Debug, Formatter};
-use std::u32;
 
 use symbol::{Symbol, Symbols};
 use terminal::Terminal;

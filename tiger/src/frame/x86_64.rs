@@ -232,9 +232,10 @@ impl Frame for X86_64 {
         registers
     }
 
-    fn register_count() -> usize {
+    // TODO: This is not used. Check if this is really not needed.
+    /*fn register_count() -> usize {
         Self::registers().len() - [Self::rsp(), Self::rbp()].len()
-    }
+    }*/
 
     fn temp_map() -> HashMap<Temp, &'static str> {
         let mut map = HashMap::new();

@@ -184,7 +184,7 @@ fn string_offset(ptr: *const c_char) -> *const c_char {
 fn get_function_pointer(closure: *const c_void) -> fn() {
     let ptr = closure as *const usize;
     unsafe {
-        mem::transmute(ptr::read_unaligned(ptr.offset(RECORD_DATA_LAYOUT_SIZE as isize)))
+        mem::transmute(ptr::read_unaligned(ptr.add(RECORD_DATA_LAYOUT_SIZE)))
     }
 }
 

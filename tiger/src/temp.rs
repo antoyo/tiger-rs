@@ -48,8 +48,8 @@ impl Temp {
         }
     }
 
-    pub fn to_string<F: Frame>(&self) -> String {
-        F::special_name(*self)
+    pub fn to_string<F: Frame>(self) -> String {
+        F::special_name(self)
             .map(ToString::to_string)
             .unwrap_or_else(|| format!("t{}", self.num))
     }

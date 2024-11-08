@@ -128,7 +128,7 @@ impl EscapeFinder {
                 self.visit_exp(test, depth);
                 self.visit_exp(then, depth);
                 if let Some(ref else_) = *else_ {
-                    self.visit_exp(&else_, depth);
+                    self.visit_exp(else_, depth);
                 }
             },
             Expr::Int { .. } => (),

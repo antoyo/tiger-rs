@@ -67,16 +67,17 @@ fn test_execution() {
             .arg(format!("tests/{}.tig", file))
             .status()
             .expect("compile");
-        let child = Command::new(format!("./tests/{}", file))
+        let mut child = Command::new(format!("./tests/{}", file))
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
             .spawn().expect("spawn");
         if Path::new(&format!("./tests/{}.stdin", file)).exists() {
             let input = fs::read(format!("./tests/{}.stdin", file)).expect("read");
-            child.stdin.expect("stdin").write_all(&input).expect("write stdin");
+            child.stdin.as_ref().expect("stdin").write_all(&input).expect("write stdin");
         }
         let mut buffer = vec![];
-        let read_size = child.stdout.expect("stdout").read_to_end(&mut buffer).expect("output");
+        let read_size = child.stdout.as_mut().expect("stdout").read_to_end(&mut buffer).expect("output");
+        child.wait().expect("wait running compiled binary");
         let output = String::from_utf8_lossy(&buffer[..read_size]);
         let expected_output = String::from_utf8(fs::read(format!("./tests/{}.stdout", file)).expect("read")).expect("String::from_utf8");
         if output != expected_output {

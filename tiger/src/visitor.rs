@@ -95,7 +95,7 @@ pub trait Visitor {
                 self.visit_exp(test);
                 self.visit_exp(then);
                 if let Some(ref else_) = *else_ {
-                    self.visit_exp(&else_);
+                    self.visit_exp(else_);
                 }
             },
             Expr::Int { .. } => (),

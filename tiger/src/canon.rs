@@ -101,7 +101,7 @@ pub fn basic_blocks(statements: Vec<Statement>) -> (Vec<Vec<Statement>>, Label) 
 
 pub fn trace_schedule(mut basic_blocks: Vec<Vec<Statement>>, done_label: Label) -> Vec<Statement> {
     let mut label_mapping = HashMap::new();
-    label_mapping.insert(&done_label, usize::max_value());
+    label_mapping.insert(&done_label, usize::MAX);
     for (index, basic_block) in basic_blocks.iter().enumerate() {
         match basic_block.first().expect("at least one statement in basic block").statement {
             _Statement::Label(ref label) => {
@@ -149,7 +149,7 @@ pub fn trace_schedule(mut basic_blocks: Vec<Vec<Statement>>, done_label: Label) 
 
     for trace in traces {
         for index in trace {
-            let trace_statements = mem::replace(&mut basic_blocks[index], vec![]);
+            let trace_statements = mem::take(&mut basic_blocks[index]);
             for statement in trace_statements {
                 statements.push_back(statement);
             }
@@ -212,7 +212,7 @@ pub fn trace_schedule(mut basic_blocks: Vec<Vec<Statement>>, done_label: Label) 
                 match expr {
                     Exp::Name(label) => {
                         if labels.len() == 1 && labels[0] == label {
-                            if let Some(ref statement) = statements.front() {
+                            if let Some(statement) = statements.front() {
                                 if let _Statement::Label(ref next_label) = statement.statement {
                                     if next_label == &label {
                                         // Remove unconditional jumps to next statement.

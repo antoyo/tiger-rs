@@ -57,7 +57,8 @@ pub trait Frame: Clone {
     const WORD_SIZE: i64;
 
     fn registers() -> Vec<Temp>;
-    fn register_count() -> usize;
+    // TODO: This is not used. Check if this is really not needed.
+    //fn register_count() -> usize;
     fn temp_map() -> HashMap<Temp, &'static str>;
     fn special_name(temp: Temp) -> Option<&'static str>;
 

@@ -44,7 +44,7 @@ impl Strings {
 
     pub fn get(&self, symbol: Symbol) -> Option<String> {
         let strings = self.strings.borrow();
-        strings.get(&symbol).map(Clone::clone)
+        strings.get(&symbol).cloned()
     }
 }
 
@@ -79,7 +79,7 @@ impl<T> Symbols<T> {
     }
 
     pub fn enter(&mut self, symbol: Symbol, data: T) {
-        let bindings = self.table.entry(symbol).or_insert_with(Vec::new);
+        let bindings = self.table.entry(symbol).or_default();
         bindings.push(data);
         let current_bindings = self.stack.last_mut().expect("Call begin_scope() before enter()");
         current_bindings.push(symbol);
@@ -100,7 +100,7 @@ impl<T> Symbols<T> {
     }
 
     pub fn replace(&mut self, symbol: Symbol, data: T) {
-        let bindings = self.table.entry(symbol).or_insert_with(Vec::new);
+        let bindings = self.table.entry(symbol).or_default();
         bindings.pop().expect("Call enter() before replace()");
         bindings.push(data);
     }

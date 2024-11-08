@@ -29,8 +29,14 @@ use temp::{Label, Temp, TempMap};
 #[derive(Eq, PartialEq, PartialOrd, Ord)]
 pub struct StackLocation(pub i64);
 
-// TODO: create a struct for the return type.
-pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_live_analysis: bool) -> (Vec<(Temp, Interval)>, HashMap<Temp, Interval>, HashSet<usize>, Vec<(Label, BTreeSet<StackLocation>)>) {
+pub struct LiveIntervals {
+    pub intervals: Vec<(Temp, Interval)>,
+    pub precolored_intervals: HashMap<Temp, Interval>,
+    pub instructions_visited: HashSet<usize>,
+    pub temp_pointers: Vec<(Label, BTreeSet<StackLocation>)>,
+}
+
+pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_live_analysis: bool) -> LiveIntervals {
     let mut live_in: HashMap<usize, BTreeSet<Temp>> = HashMap::new();
     let mut live_out: HashMap<usize, BTreeSet<Temp>> = HashMap::new();
 
@@ -56,11 +62,11 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_l
             let mut stack_set = BTreeSet::new();
             let mut set = BTreeSet::new();
             for &successor in node.successors() {
-                let in_set = live_in.entry(successor.index()).or_insert_with(BTreeSet::new);
+                let in_set = live_in.entry(successor.index()).or_default();
                 set.extend(in_set.clone());
 
                 if do_stack_live_analysis {
-                    let in_set = stack_live_in.entry(successor.index()).or_insert_with(BTreeSet::new);
+                    let in_set = stack_live_in.entry(successor.index()).or_default();
                     stack_set.extend(in_set.clone());
                 }
             }
@@ -70,13 +76,13 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_l
             }
 
             let mut set = node.uses.clone();
-            let out = live_out.entry(index).or_insert_with(BTreeSet::new);
+            let out = live_out.entry(index).or_default();
             set.extend(out.difference(&node.defines));
             live_in.insert(index, set);
 
             if do_stack_live_analysis {
                 let mut set = node.stack_uses.clone();
-                let out = stack_live_out.entry(index).or_insert_with(BTreeSet::new);
+                let out = stack_live_out.entry(index).or_default();
                 set.extend(out.difference(&node.stack_defines));
                 stack_live_in.insert(index, set);
             }
@@ -132,7 +138,7 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_l
     for temp in &temps {
         // Since we don't know how many instructions will be added yet, we set the range up to the
         // max value.
-        let interval = Interval::new(*temp, usize::max_value());
+        let interval = Interval::new(*temp, usize::MAX);
         if precolored.contains_key(temp) {
             precolored_intervals.insert(*temp, interval);
         }
@@ -191,7 +197,12 @@ pub fn live_intervals<F: Frame>(graph: FlowGraph, temp_map: &TempMap, do_stack_l
     }
 
     let intervals = intervals.into_iter().collect();
-    (intervals, precolored_intervals, instructions_visited, temp_pointers)
+    LiveIntervals {
+        intervals,
+        precolored_intervals,
+        instructions_visited,
+        temp_pointers,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -305,7 +316,7 @@ impl Eq for Interval {
 
 impl PartialOrd for Interval {
     fn partial_cmp(&self, other: &Interval) -> Option<Ordering> {
-        self.priority.partial_cmp(&other.priority)
+        Some(self.cmp(other))
     }
 }
 

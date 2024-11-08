@@ -23,6 +23,7 @@
 
 use temp::{Label, Temp};
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Exp {
     Const(i64),
