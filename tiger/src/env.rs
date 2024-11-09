@@ -20,13 +20,12 @@
  */
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use escape::{DepthEscape, EscapeEnv};
 use frame::Frame;
-use gen;
-use gen::{Access, Level};
+use gen::Access;
 use position::WithPos;
 use symbol::{
     Strings,
@@ -62,10 +61,7 @@ impl Ord for ClosureField {
 pub enum Entry<F: Clone + Frame> {
     Fun {
         external: bool,
-        is_normal_function: bool,
         label: Label,
-        level: Level<F>,
-        escaping_vars: BTreeSet<ClosureField>,
         parameters: Vec<Type>,
         param_type_symbols: Vec<SymbolWithPos>,
         result: Type,
@@ -126,10 +122,7 @@ impl<F: Clone + Frame> Env<F> {
         let symbol = self.var_env.symbol(name);
         let entry = Entry::Fun {
             external: true,
-            is_normal_function: true,
             label: Label::with_name(name),
-            level: gen::outermost(), // FIXME: Might want to create a new level.
-            escaping_vars: BTreeSet::new(),
             parameters,
             param_type_symbols: vec![],
             result,

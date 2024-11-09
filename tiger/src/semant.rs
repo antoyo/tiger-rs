@@ -333,16 +333,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     }
                     levels.push(level.clone());
 
-                    // escaping_vars contains the variables that escape and are defined in the
-                    // outside scopes.
-                    let escaping_vars = self.find_escaping_vars();
-
                     self.env.enter_var(func_symbol, Entry::Fun {
                         external: false,
-                        is_normal_function: true,
                         label: Label::with_name(&func_name),
-                        level,
-                        escaping_vars,
                         parameters,
                         param_type_symbols,
                         result: result_type.clone(),
@@ -1076,17 +1069,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Type::Array(ref typ, _) => typ.is_pointer(),
             Type::Error => false,
             _ => ty.is_pointer()
-        }
-    }
-
-    fn find_escaping_vars(&self) -> BTreeSet<ClosureField> {
-        if let Some(escaping_vars) = self.escaping_vars.last() {
-            escaping_vars.iter()
-                .cloned()
-                .collect()
-        }
-        else {
-            BTreeSet::new()
         }
     }
 
