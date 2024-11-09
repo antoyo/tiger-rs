@@ -2,8 +2,7 @@
 
 (( i = 1 ))
 
-#files=(comments conditions escapes functions gc hello hello1 hello2 hello3 hello5 integers lib loops nested queens record spill strings vars)
-files=(gc)
+files=(comments conditions escapes functional functions gc hello hello1 hello2 hello3 hello5 integers lib merge nested pure pureClosure pureTree record spill strings vars)
 
 while true; do
     echo "******************************"

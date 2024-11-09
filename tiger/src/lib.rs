@@ -40,6 +40,7 @@ use std::ffi::CStr;
 use std::io::{Read, Write, stdin, stdout};
 use std::mem;
 use std::os::raw::{c_char, c_void};
+use std::process::exit;
 use std::ptr;
 
 use collector::{Layout, GARBAGE_COLLECTOR};
@@ -172,6 +173,11 @@ extern fn printi(num: i32, continuation: *const c_void) {
         let function: fn(*const c_void) = mem::transmute(get_function_pointer(continuation));
         function(continuation);
     }
+}
+
+#[no_mangle]
+extern fn tigerExit() {
+    exit(0);
 }
 
 // Get the pointer where the string starts, i.e. after the data layout.

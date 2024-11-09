@@ -2,6 +2,6 @@ let function hello(c: cont) = print("Hello, World!\n", c)
     type intArray = array of int
 in
     hello(function() =
-        print("Test\n", exit)
+        print("Test\n", tigerExit)
     )
 end

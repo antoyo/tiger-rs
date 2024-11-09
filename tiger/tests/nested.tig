@@ -38,5 +38,5 @@ let function intToString(i: int): string =
             n5
         end
 in
-    print(f(), exit)
+    print(f(), tigerExit)
 end

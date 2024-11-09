@@ -71,7 +71,7 @@ in
                 print(look(tree, 20), function() =
                     print("\n", function() =
                         print(look(newTree, 20), function() =
-                            print("\n", exit)
+                            print("\n", tigerExit)
                         )
                     )
                 )

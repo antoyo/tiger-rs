@@ -38,5 +38,5 @@ let function maximum(a: int, b: int): int =
     var n4 := concat(concat(n3, intToString(maximum(24, 42))), "\n")
     var n5 := concat(concat(n4, intToString(sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))), "\n")
 in
-    print(n5, exit)
+    print(n5, tigerExit)
 end

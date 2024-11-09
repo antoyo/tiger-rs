@@ -30,5 +30,5 @@ let var n := 10
     var n4 := concat(concat(n3, intToString(result)), "\n")
     var n5 := concat(concat(n4, intToString(200 - n * minus_n)), "\n")
 in
-    print(n5, exit)
+    print(n5, tigerExit)
 end

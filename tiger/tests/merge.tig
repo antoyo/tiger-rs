@@ -88,7 +88,7 @@ let type maybeInt = {isInt: int, num: int}
         else (
             printint(l.first, function() =
                 print(" ", function() =
-                    printlist(l.rest, exit)
+                    printlist(l.rest, tigerExit)
                 )
             )
         )
@@ -97,7 +97,7 @@ in
         getchar(function(char: string) = (
             /* Ignore the character between the lists. */
             readlist(function(list2: list) =
-                printlist(merge(list1, list2), exit)
+                printlist(merge(list1, list2), tigerExit)
             )
         ))
     ))

@@ -210,7 +210,7 @@ impl<F: Clone + Frame> Env<F> {
         functions.insert("print", (vec![Type::String, cont.clone()], Type::Answer));
         functions.insert("flush", (vec![cont], Type::Answer));
         functions.insert("getchar", (vec![Type::Name(WithPos::dummy(self.type_env.symbol("stringConsumer")), None)], Type::Answer));
-        functions.insert("exit", (vec![], Type::Answer));
+        functions.insert("tigerExit", (vec![], Type::Answer));
 
         functions.insert("allocRecord", (vec![Type::Int], Type::Int));
         functions.insert("initArray", (vec![Type::Int, Type::Int], Type::Int));

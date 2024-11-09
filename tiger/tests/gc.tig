@@ -112,7 +112,7 @@ in (
                                         printi(list.first, function() =
                                             print(b[11].names[20], function() =
                                                 debug("") /* FIXME: we should probably call print here, but I'm not sure which continuation to send. */
-                                                /*print("\n", exit) */
+                                                /*print("\n", tigerExit) */
                                             )
                                         )
                                     )
@@ -177,7 +177,7 @@ in (
                                 closure4(3, function() =
                                     closure5(3, 11, function() =
                                         debug("") /* FIXME: we should probably call print here, but I'm not sure which continuation to send. */
-                                        /*print("\n", exit) */
+                                        /*print("\n", tigerExit) */
                                     )
                                 )
                             )
@@ -202,7 +202,7 @@ in (
                                                     printi(p10.y, function() =
                                                         printi(array_of_vec[10].y, function() =
                                                             print(string, function() =
-                                                                printi(list.first, exit)
+                                                                printi(list.first, tigerExit)
                                                             )
                                                         )
                                                     )

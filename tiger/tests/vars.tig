@@ -4,7 +4,7 @@ let var i := 0
 in (
     printi(i, function() =
         printi(j, function() =
-            printi(k, exit)
+            printi(k, tigerExit)
         )
     )
 )

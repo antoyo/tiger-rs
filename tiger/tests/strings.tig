@@ -8,12 +8,12 @@
                             print("true\n", function() =
                                 getchar(function(char: string) =
                                     print(char, function() =
-                                        print("\n", exit)
+                                        print("\n", tigerExit)
                                     )
                                 )
                             )
                         else
-                            exit()
+                            tigerExit()
                     )
                 )
             )

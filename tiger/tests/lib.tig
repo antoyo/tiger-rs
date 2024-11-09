@@ -1,1 +1,1 @@
-print(concat("Hello, ", "World!\n"), exit)
+print(concat("Hello, ", "World!\n"), tigerExit)

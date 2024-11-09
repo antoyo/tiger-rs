@@ -1,6 +1,6 @@
 let var N := 8
 in
     print("\n\t\\\"\065\
-    	\test\n", exit)
+    	\test\n", tigerExit)
 end
 

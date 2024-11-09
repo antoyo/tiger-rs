@@ -37,7 +37,7 @@ let type intConsumer = int -> answer
 
     function loop(i: int) =
         if i > 12 then
-            exit()
+            tigerExit()
         else
             let function ask() =
                     getInt(loop)

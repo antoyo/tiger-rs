@@ -43,7 +43,7 @@ in
                 printi(const(2, 4), function() =
                     printi(myStruct.myNum, function() =
                         printi(fielding, function() =
-                            printi(both, exit)
+                            printi(both, tigerExit)
                         )
                     )
                 )

@@ -18,7 +18,7 @@ in (
                             printi(g, function() =
                                 printi(h, function() =
                                     printi(i, function() =
-                                        printi(j, exit)
+                                        printi(j, tigerExit)
                                     )
                                 )
                             )

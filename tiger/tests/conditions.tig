@@ -14,7 +14,7 @@ let var num := 42
         print(false, function() =
             print("\n", function() =
                 print(true, function() =
-                    print("\n", exit)
+                    print("\n", tigerExit)
                 )
             )
         )

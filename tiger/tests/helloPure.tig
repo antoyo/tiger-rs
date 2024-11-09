@@ -1,7 +1,7 @@
 let function cont() =
     getchar(function(char: string) =
         let function next() =
-            print("\n", exit)
+            print("\n", tigerExit)
         in
             print(char, next)
         end

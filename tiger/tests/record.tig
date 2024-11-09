@@ -12,7 +12,7 @@ let type Point = {
     }
 in (
     printi(point.x, function() =
-        printi(point.y, exit)
+        printi(point.y, tigerExit)
     )
 )
 end

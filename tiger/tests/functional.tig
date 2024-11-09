@@ -62,5 +62,5 @@ let type intfun = int -> int
     var n6 := concat(concat(n5, intToString(addTen(2))), "\n")
     var n7 := concat(concat(n6, intToString(addTwentyFour(seventeen))), "\n")
 in
-    print(n7, exit)
+    print(n7, tigerExit)
 end
