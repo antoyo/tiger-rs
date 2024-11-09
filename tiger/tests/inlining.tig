@@ -1,0 +1,5 @@
+let function inc(x: int) : int =
+        x + 1
+in
+    printi(inc(10))
+end

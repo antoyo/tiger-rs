@@ -20,6 +20,7 @@
  */
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use ast::Operator;
@@ -69,6 +70,20 @@ use temp::{Label, Temp, TempMap};
 
 #[allow(type_alias_bounds)]
 pub type Access<F: Frame> = (Level<F>, F::Access);
+
+pub struct IR<F: Frame> {
+    pub data: Vec<Fragment<F>>,
+    pub functions: BTreeMap<String, Fragment<F>>,
+}
+
+impl<F: Frame> IR<F> {
+    fn new() -> Self {
+        Self {
+            data: vec![],
+            functions: BTreeMap::new(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Level<F> {
@@ -573,23 +588,23 @@ fn to_ir_rel_op(op: Operator) -> RelationalOp {
 }
 
 pub struct Gen<F: Frame> {
-    fragments: Vec<Fragment<F>>,
+    ir: IR<F>,
 }
 
 impl<F:Frame> Gen<F> {
     pub fn new() -> Self {
         Self {
-            fragments: vec![],
+            ir: IR::new(),
         }
     }
 
-    pub fn get_result(self) -> Vec<Fragment<F>> {
-        self.fragments
+    pub fn get_result(self) -> IR<F> {
+        self.ir
     }
 
     pub fn proc_entry_exit(&mut self, level: &Level<F>, body: Exp, temp_map: TempMap, escaping_vars: Vec<i64>) {
         let body = Move(Exp::Temp(F::return_value()), body).into();
-        self.fragments.push(Fragment::Function {
+        self.ir.functions.insert(level.current.borrow().name().to_string(), Fragment::Function {
             body,
             escaping_vars,
             frame: level.current.clone(),
@@ -599,12 +614,12 @@ impl<F:Frame> Gen<F> {
 
     pub fn string_literal(&mut self, string: String) -> Exp {
         let label = Label::new();
-        self.fragments.push(Fragment::Str(label.clone(), string));
+        self.ir.data.push(Fragment::Str(label.clone(), string));
         Name(label)
     }
 
     pub fn vtable(&mut self, class: Label, methods: Vec<Label>) {
-        self.fragments.push(Fragment::VTable {
+        self.ir.data.push(Fragment::VTable {
             class,
             methods,
         });

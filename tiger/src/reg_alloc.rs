@@ -530,7 +530,7 @@ mod tests {
             let semantic_analyzer = SemanticAnalyzer::new(&mut env, &mut symbols, Rc::clone(&strings));
             let fragments = semantic_analyzer.analyze(ast).expect("semantic analyze");
 
-            for fragment in fragments {
+            for (_, fragment) in fragments.functions {
                 match fragment {
                     Fragment::Function { body, escaping_vars, frame, temp_map } => {
                         let mut frame = frame.borrow_mut();

@@ -42,10 +42,11 @@ use ast::{
 };
 use env::{Env, Entry};
 use error::{Error, Result};
-use frame::{Fragment, Frame, Memory};
+use frame::{Frame, Memory};
 use gen;
 use gen::{
     Gen,
+    IR,
     Level,
     array_subscript,
     binary_oper,
@@ -149,7 +150,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.errors.push(error);
     }
 
-    pub fn analyze(mut self, expr: ExprWithPos) -> Result<Vec<Fragment<F>>> {
+    pub fn analyze(mut self, expr: ExprWithPos) -> Result<IR<F>> {
         let main_symbol = self.symbols.symbol("main");
         let pos = expr.pos;
         let body = WithPos::new(

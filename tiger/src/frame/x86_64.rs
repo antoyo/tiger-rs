@@ -420,7 +420,7 @@ impl Frame for X86_64 {
     fn proc_entry_exit3(&self, body: Vec<Instruction>) -> Subroutine {
         let mut stack_size = -self.pointer;
         if stack_size % 16 != 0 {
-            // Align the stack of 16 bytes.
+            // Align the stack to 16 bytes.
             stack_size = (stack_size & !0xF) + 0x10;
         }
 
