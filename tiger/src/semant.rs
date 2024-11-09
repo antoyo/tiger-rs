@@ -205,6 +205,41 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
+    fn compatible_types(&mut self, expected: &Type, unexpected: &Type) -> bool {
+        let expected = self.actual_ty(expected);
+        let unexpected = self.actual_ty(unexpected);
+        if expected != unexpected && expected != Type::Error && unexpected != Type::Error {
+            if let Type::Record { .. } = expected {
+                if unexpected == Type::Nil {
+                    return true;
+                }
+            }
+
+            if let (&Type::Function { parameters: ref left_parameters, return_type: ref left_return_type },
+                &Type::Closure { parameters: ref right_parameters, return_type: ref right_return_type }) =
+                (&expected, &unexpected)
+            {
+                let mut types_match = true;
+                if left_parameters.len() != right_parameters.len() {
+                    types_match = false;
+                }
+                for (left_param, right_param) in left_parameters.iter().zip(right_parameters) {
+                    if !self.compatible_types(left_param, right_param) {
+                        types_match = false;
+                    }
+                }
+                if !self.compatible_types(left_return_type, right_return_type) {
+                    types_match = false;
+                }
+
+                return types_match;
+            }
+            return false;
+        }
+
+        true
+    }
+
     fn check_types(&mut self, expected: &Type, unexpected: &Type, pos: Pos) {
         let expected = self.actual_ty(expected);
         let unexpected = self.actual_ty(unexpected);
@@ -215,11 +250,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             }
 
-            self.add_error(Error::Type {
-                expected,
-                pos,
-                unexpected,
-            });
+            if !self.compatible_types(&expected, &unexpected) {
+                self.add_error(Error::Type {
+                    expected,
+                    pos,
+                    unexpected,
+                });
+            }
         }
     }
 
@@ -340,6 +377,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     }
                     self.env.begin_scope();
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(level.formals().into_iter()) {
+                        if type_is_collectable(&param) {
+                            self.temp_map.insert::<F>(&access.1);
+                        }
                         self.env.enter_var(name, Entry::Var { access, typ: param });
                     }
 
@@ -380,8 +420,8 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         let mut parameters = vec![];
                         for param in params {
                             parameters.push(self.get_type(&param.node.typ, DontAddError));
-                            }
-                        Some(Type::Function {
+                        }
+                        Some(Type::Closure {
                             parameters,
                             return_type: Box::new(return_type),
                         })
@@ -598,6 +638,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.env.enter_var(name.node, Entry::Var { access, typ: function_type });
 
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(func_level.formals().into_iter()) {
+                        if type_is_collectable(&param) {
+                            self.temp_map.insert::<F>(&access.1);
+                        }
                         self.env.enter_var(name, Entry::Var { access, typ: param });
                     }
                     self.env.enter_escape(closure_param_symbol, false);
@@ -621,7 +664,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     parameters.push(self.get_type(&param.node.typ, DontAddError));
                 }
 
-                let ty = Type::Function {
+                let ty = Type::Closure {
                     parameters,
                     return_type: Box::new(result_type),
                 };
@@ -700,7 +743,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let (parameters, result) =
                     match function.ty {
-                        Type::Function { ref parameters, ref return_type, .. } => (parameters, return_type),
+                        Type::Closure { ref parameters, ref return_type } | Type::Function { ref parameters, ref return_type } => (parameters, return_type),
                         Type::Error => return EXP_TYPE_ERROR,
                         _ => return self.not_callable(&function.ty, pos),
                     };
@@ -944,7 +987,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 unreachable!();
                             };
 
-                        let ty = Type::Function {
+                        let ty = Type::Closure { // TODO: check if it should always be a closure.
                             parameters: parameters.clone(),
                             return_type: Box::new(result.clone()),
                         };
@@ -991,7 +1034,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let parameters = parameters.iter()
                     .map(|param| self.trans_ty(name, param))
                     .collect();
-                Type::Function {
+                Type::Closure {
                     parameters,
                     return_type: Box::new(self.trans_ty(name, return_type)),
                 }
@@ -1188,7 +1231,7 @@ fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F
 
 fn type_is_collectable(typ: &Type) -> bool {
     match *typ {
-        Type::Array { .. } | Type::Function { .. } | Type::Record { .. } | Type::String => true,
+        Type::Array { .. } | Type::Closure { .. } | Type::Function { .. } | Type::Record { .. } | Type::String => true,
         _ => false,
     }
 }

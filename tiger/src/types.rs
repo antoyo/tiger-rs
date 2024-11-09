@@ -27,6 +27,11 @@ use symbol::{Symbol, Symbols, SymbolWithPos};
 pub enum Type {
     Array(Box<Type>, Unique),
     Answer,
+    // TODO: check if this type is still needed to fix the GC issue.
+    Closure {
+        parameters: Vec<Type>,
+        return_type: Box<Type>,
+    },
     Function {
         parameters: Vec<Type>,
         return_type: Box<Type>,
@@ -48,7 +53,7 @@ pub enum Type {
 impl Type {
     pub fn is_pointer(&self) -> bool {
         match *self {
-            Array { .. } | Record { .. } | String  => true,
+            Array { .. } | Closure { .. } | Record { .. } | String  => true,
             Name(_, ref typ) => {
                 if let Some(typ) = typ.as_ref() {
                     typ.is_pointer()
@@ -67,7 +72,7 @@ impl Type {
             Array(ref typ, _) => {
                 format!("[{}]", typ.show(symbols))
             },
-            Function { ref parameters, ref return_type } => {
+            Closure { ref parameters, ref return_type } | Function { ref parameters, ref return_type } => {
                 let show_parens = parameters.len() != 1;
                 let mut string = std::string::String::new();
                 if show_parens {

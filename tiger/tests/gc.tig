@@ -26,14 +26,18 @@ let type Point = {
     function g() : Point =
         let var p := f()
         in
-            p.x := 4;
-            p
+            Point {
+                x = 4,
+                y = p.y
+            }
         end
     function h() : Point =
         let var p := g()
         in
-            p.y := 12;
-            p
+            Point {
+                x = p.x,
+                y = 12
+            }
         end
     var p10 := h()
     type vecArray = array of Vec3D
@@ -46,8 +50,31 @@ let type Point = {
     var string := concat("Hello, ", "World\n")
     type list = {first: int, rest: list}
     var list := list { first = 42, rest = nil }
+
+    type callback = int -> answer
+    type continuation = () -> answer
+    function fifty_times(callback: callback, afterCallback: continuation) =
+        let function loop(counter: int, callback: callback) =
+            if counter >= 0 then (
+                callback(50 - counter);
+                loop(counter - 1, callback)
+            )
+            else (
+                afterCallback()
+            )
+        in
+            loop(50, callback)
+        end
 in (
-    for i := 0 to 50 do
+    /* FIXME: there's a closure in the main function that is deallocated by the GC.
+     * It seems to be the one sent to fifty_times.
+     * FIXME: perhaps the issue is that the collector sees a function pointer instead of the record for a closure?
+     * FIXME: perhaps we don't mark function parameters as collectible?
+     * ==> Marking them doesn't seem to help.
+     * =====> I didn't mark them for closures. Marking them seems to fix the issue!!!
+     * TODO TODO: if I can't find the issue, log allocated and deallocated addresses.
+     * */
+    fifty_times(function(i: int) =
         let var origin := Point {
                 x = 20,
                 y = 21
@@ -73,85 +100,123 @@ in (
                 names = strings[22] of "b vecArray"
             }
             var list := list { first = 43, rest = nil }
+            var list := list { first = 25, rest = list }
         in
-            list := list { first = 25, rest = list };
-            printi(i);
-            printi(origin.x);
-            printi(p2.x);
-            printi(p3.x);
-            printi(p4.x);
-            printi(a[3]);
-            printi(b[3].z);
-            printi(list.first);
-            print(b[11].names[20]);
-            print("\n")
-        end;
-
-    for i := 0 to 50 do
-        let var origin := Point {
-                x = 20,
-                y = 21
-            }
-            var closure1 := function() =
-                printi(origin.x)
-            var p2 := Point {
-                x = 22,
-                y = 23
-            }
-            var p3 := Point {
-                x = 24,
-                y = 25
-            }
-            var closure2 := function() = (
-                printi(p2.x);
-                printi(p3.x)
+            printi(i, function() =
+                printi(origin.x, function() =
+                    printi(p2.x, function() =
+                        printi(p3.x, function() =
+                            printi(p4.x, function() =
+                                printi(a[3], function() =
+                                    printi(b[3].z, function() =
+                                        printi(list.first, function() =
+                                            print(b[11].names[20], function() =
+                                                debug("") /* FIXME: we should probably call print here, but I'm not sure which continuation to send. */
+                                                /*print("\n", exit) */
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
             )
-            var p4 := Point {
-                x = 26,
-                y = 27
-            }
-            var closure3 := function() =
-                printi(p4.x)
-            type intArray = array of int
-            var a := intArray[12] of 14
-            var closure4 := function(index: int) =
-                printi(a[3])
-            var b := vecArray[12] of Vec3D {
-                x = 1,
-                y = 2,
-                z = 3,
-                names = strings[22] of "b vecArray"
-            }
-            var list := list { first = 43, rest = nil }
-            var closure5 := function(index1: int, index2: int) = (
-                printi(b[index1].z);
-                printi(list.first);
-                print(b[index2].names[20])
-            )
-        in
-            list := list { first = 25, rest = list };
-            printi(i);
-            closure1();
-            closure2();
-            closure3();
-            closure4(3);
-            closure5(3, 11);
-            print("\n")
-        end;
-
-    list := list { first = 24, rest = list };
-    printi(point.x);
-    printi(point.y);
-    point.y := 100;
-    printi(point.x);
-    printi(point.y);
-    point.x := 200;
-    printi(point.x);
-    printi(point.y);
-    printi(p10.x);
-    printi(p10.y);
-    printi(array_of_vec[10].y);
-    print(string);
-    printi(list.first)
+        end
+    , function() =
+        fifty_times(function(i: int) =
+            let var origin := Point {
+                    x = 20,
+                    y = 21
+                }
+                var closure1 := function(cont: continuation) =
+                    printi(origin.x, cont)
+                var p2 := Point {
+                    x = 22,
+                    y = 23
+                }
+                var p3 := Point {
+                    x = 24,
+                    y = 25
+                }
+                var closure2 := function(cont: continuation) = (
+                    printi(p2.x, function() =
+                        printi(p3.x, cont)
+                    )
+                )
+                var p4 := Point {
+                    x = 26,
+                    y = 27
+                }
+                var closure3 := function(cont: continuation) =
+                    printi(p4.x, cont)
+                type intArray = array of int
+                var a := intArray[12] of 14
+                var closure4 := function(index: int, cont: continuation) =
+                    printi(a[3], cont)
+                var b := vecArray[12] of Vec3D {
+                    x = 1,
+                    y = 2,
+                    z = 3,
+                    names = strings[22] of "b vecArray"
+                }
+                var list := list { first = 43, rest = nil }
+                var closure5 := function(index1: int, index2: int, cont: continuation) = (
+                    printi(b[index1].z, function() =
+                        printi(list.first, function() =
+                            print(b[index2].names[20], cont)
+                        )
+                    )
+                )
+                var list := list { first = 25, rest = list }
+            in
+                printi(i, function() = (
+                    closure1(function() =
+                        closure2(function() =
+                            closure3(function() =
+                                closure4(3, function() =
+                                    closure5(3, 11, function() =
+                                        debug("") /* FIXME: we should probably call print here, but I'm not sure which continuation to send. */
+                                        /*print("\n", exit) */
+                                    )
+                                )
+                            )
+                        )
+                    )
+                ))
+            end
+        , function() =
+            let var list := list { first = 24, rest = list }
+            in
+                printi(point.x, function() =
+                    printi(point.y, function() =
+                        let var point := Point { x = point.x, y = 100 }
+                        in
+                            printi(point.x, function() =
+                                printi(point.y, function() =
+                                    let var point := Point { x = 200, y = point.y }
+                                    in
+                                        printi(point.x, function() =
+                                            printi(point.y, function() =
+                                                printi(p10.x, function() =
+                                                    printi(p10.y, function() =
+                                                        printi(array_of_vec[10].y, function() =
+                                                            print(string, function() =
+                                                                printi(list.first, exit)
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    end
+                                )
+                            )
+                        end
+                    )
+                )
+            end
+        )
+    )
 )
 end

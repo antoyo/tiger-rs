@@ -19,49 +19,44 @@ let type maybeInt = {isInt: int, num: int}
             nextDigit(0, 0)
         end
 
-    function reverse(xs: list): list = (
-        debug("reverse");
-        if xs <> nil then (
-            debug("xs is not nil");
-            debugInt(xs.first);
-            debug("after accessing xs.first");
-            list { first = xs.first, rest = reverse(xs.rest) }
-        )
-        else (
-            debug("xs is nil");
-            nil
-        )
-    )
+    function reverse(xs: list): list =
+        let function inner(xs: list, acc: list): list =
+            if xs <> nil then (
+                inner(xs.rest, list {
+                    first = xs.first,
+                    rest = acc
+                })
+            )
+            else
+                acc
+        in
+            if xs <> nil then
+                inner(xs.rest, list {
+                    first = xs.first,
+                    rest = nil
+                })
+            else
+                xs
+        end
 
     function readlist(done: listConsumer) =
         let function next(acc: list) = (
-            debug("next");
             readint(function(maybeInt: maybeInt) = (
-                debug("readint callback");
                 if maybeInt.isInt then (
-                    debug("Before accessing maybeInt");
                     let var first := maybeInt.num
                     in
-                        debug("After accessing maybeInt");
                         next(list { first = first, rest = acc })
                     end
                 )
                 else (
-                    debug("before reverse");
                     let var rev := reverse(acc)
                     in
-                        debug("after reverse");
-                        if rev = nil then
-                            debug("rev is nil")
-                        else
-                            debug("rev is not nil");
                         done(rev)
                     end
                 )
             ))
         )
         in
-            debug("readlist");
             next(nil)
         end
 
@@ -99,14 +94,11 @@ let type maybeInt = {isInt: int, num: int}
         )
 in
     readlist(function(list1: list) = (
-        debug("readlist callback");
         getchar(function(char: string) = (
-            debug("delimiter getchar");
             /* Ignore the character between the lists. */
-            readlist(function(list2: list) = (
-                debug("readlist callback");
+            readlist(function(list2: list) =
                 printlist(merge(list1, list2), exit)
-            ))
+            )
         ))
     ))
 end

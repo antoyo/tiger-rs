@@ -19,6 +19,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+// TODO: run the error tests.
+
 use std::fs::{self, remove_file};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -33,7 +35,7 @@ fn test_execution() {
         "escapes",
         "functional",
         "functions",
-        //"gc", // FIXME: make the gc example pure.
+        "gc",
         "hello",
         "hello1",
         "hello2",
