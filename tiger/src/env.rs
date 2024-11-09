@@ -204,6 +204,7 @@ impl<F: Clone + Frame> Env<F> {
         functions.insert("stringEqual", (vec![Type::String, Type::String], Type::Int));
 
         let cont = Type::Name(WithPos::dummy(self.type_env.symbol("cont")), None);
+        functions.insert("debug", (vec![Type::String], Type::Answer));
         functions.insert("debugInt", (vec![Type::Int], Type::Answer));
         functions.insert("printi", (vec![Type::Int, cont.clone()], Type::Answer));
         functions.insert("print", (vec![Type::String, cont.clone()], Type::Answer));

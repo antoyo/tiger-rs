@@ -9,15 +9,24 @@ let var a := 1
     var i := 9
     var j := 10
 in (
-    printi(a);
-    printi(b);
-    printi(c);
-    printi(d);
-    printi(e);
-    printi(f);
-    printi(g);
-    printi(h);
-    printi(i);
-    printi(j)
+    printi(a, function() =
+        printi(b, function() =
+            printi(c, function() =
+                printi(d, function() =
+                    printi(e, function() =
+                        printi(f, function() =
+                            printi(g, function() =
+                                printi(h, function() =
+                                    printi(i, function() =
+                                        printi(j, exit)
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
 )
 end

@@ -1,0 +1,112 @@
+let type maybeInt = {isInt: int, num: int}
+    type list = {first: int, rest: list}
+    type intConsumer = maybeInt -> answer
+    type listConsumer = list -> answer
+
+    function readint(done: intConsumer) =
+        let function isdigit(s : string) : int =
+                ord(s) >= ord("0") & ord(s) <= ord("9")
+            function nextDigit(accum: int, isInt: int) =
+                let function eatChar(dig: string) =
+                    if isdigit(dig) then
+                        nextDigit(accum * 10 + ord(dig) - ord("0"), 1)
+                    else
+                        done(maybeInt { isInt = isInt, num = accum })
+                in
+                    getchar(eatChar)
+                end
+        in
+            nextDigit(0, 0)
+        end
+
+    function reverse(xs: list): list = (
+        debug("reverse");
+        if xs <> nil then (
+            debug("xs is not nil");
+            debugInt(xs.first);
+            debug("after accessing xs.first");
+            list { first = xs.first, rest = reverse(xs.rest) }
+        )
+        else (
+            debug("xs is nil");
+            nil
+        )
+    )
+
+    function readlist(done: listConsumer) =
+        let function next(acc: list) = (
+            debug("next");
+            readint(function(maybeInt: maybeInt) = (
+                debug("readint callback");
+                if maybeInt.isInt then (
+                    debug("Before accessing maybeInt");
+                    let var first := maybeInt.num
+                    in
+                        debug("After accessing maybeInt");
+                        next(list { first = first, rest = acc })
+                    end
+                )
+                else (
+                    debug("before reverse");
+                    let var rev := reverse(acc)
+                    in
+                        debug("after reverse");
+                        if rev = nil then
+                            debug("rev is nil")
+                        else
+                            debug("rev is not nil");
+                        done(rev)
+                    end
+                )
+            ))
+        )
+        in
+            debug("readlist");
+            next(nil)
+        end
+
+    function merge(a: list, b: list) : list =
+        if a = nil then
+            b
+        else if b = nil then
+            a
+        else if a.first < b.first then
+            list { first = a.first, rest = merge(a.rest, b) }
+        else
+            list { first = b.first, rest = merge(a, b.rest) }
+
+    function printint(i: int, c: cont) =
+        if i = 0 then
+            c()
+        else
+            let var rest := i / 10
+                var dig := i - rest * 10
+                function doDigit() =
+                    print(chr(dig + ord("0")), c)
+            in
+                printint(rest, doDigit)
+            end
+
+    function printlist(l: list, c: cont) =
+        if l = nil then
+            print("\n", c)
+        else (
+            printint(l.first, function() =
+                print(" ", function() =
+                    printlist(l.rest, exit)
+                )
+            )
+        )
+in
+    readlist(function(list1: list) = (
+        debug("readlist callback");
+        getchar(function(char: string) = (
+            debug("delimiter getchar");
+            /* Ignore the character between the lists. */
+            readlist(function(list2: list) = (
+                debug("readlist callback");
+                printlist(merge(list1, list2), exit)
+            ))
+        ))
+    ))
+end

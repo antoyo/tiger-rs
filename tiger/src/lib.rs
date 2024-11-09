@@ -153,6 +153,14 @@ extern fn print(string: *const c_char, continuation: *const c_void) {
 }
 
 #[no_mangle]
+extern fn debug(string: *const c_char) {
+    let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
+    if let Ok(string) = cstring.to_str() {
+        println!("{}", string);
+    }
+}
+
+#[no_mangle]
 extern fn debugInt(num: i32) {
     println!("{}", num);
 }

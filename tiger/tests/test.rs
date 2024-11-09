@@ -27,6 +27,7 @@ use std::process::{Command, Stdio};
 #[test]
 fn test_execution() {
     let files = [
+        // TODO: remove the test files that are not needed anymore (array, …).
         "comments",
         "conditions",
         "escapes",
@@ -41,12 +42,13 @@ fn test_execution() {
         "helloPure",
         "integers",
         "lib",
-        "loops",
+        "merge",
         "nested",
+        //"prettyprint",
         "pure",
         "pureClosure",
         "pureTree",
-        "queens",
+        //"queens",
         "record",
         "spill",
         "strings",

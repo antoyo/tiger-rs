@@ -600,7 +600,6 @@ mod tests {
         expected_precolored_intervals.insert("tests/conditions.tig", intervals);
 
         for (filename, skip_count) in files {
-            println!("Filename: {}", filename);
             let (intervals, precolored_intervals) = get_intervals(filename, skip_count);
             let intervals: HashMap<_, _> = intervals.into_iter().collect();
 
