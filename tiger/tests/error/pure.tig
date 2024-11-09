@@ -1,4 +1,4 @@
-let pure function test() =
+let function test() =
     let var integer := 12
         type Point = {
                 x: int,

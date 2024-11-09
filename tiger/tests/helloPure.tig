@@ -1,11 +1,11 @@
-let pure function cont() =
-    getcharP(pure function(char: string) =
-        let pure function next() =
-            printP("\n", exit)
+let function cont() =
+    getchar(function(char: string) =
+        let function next() =
+            print("\n", tigerExit)
         in
-            printP(char, next)
+            print(char, next)
         end
     )
 in
-    printP("Hello, World!\n", cont)
+    print("Hello, World!\n", cont)
 end

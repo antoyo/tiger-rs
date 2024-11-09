@@ -1,33 +1,63 @@
-let type any = {any: int}
-    var buffer := getchar()
+let type maybeInt = {isInt: int, num: int}
+    type list = {first: int, rest: list}
+    type intConsumer = maybeInt -> answer
+    type listConsumer = list -> answer
 
-    function readint(any: any) : int =
-        let var i := 0
-            function isdigit(s : string) : int =
-                ord(buffer) >= ord("0") & ord(buffer) <= ord("9")
+    function readint(done: intConsumer) =
+        let function isdigit(s : string) : int =
+                ord(s) >= ord("0") & ord(s) <= ord("9")
+            function nextDigit(accum: int, isInt: int) =
+                let function eatChar(dig: string) =
+                    if isdigit(dig) then
+                        nextDigit(accum * 10 + ord(dig) - ord("0"), 1)
+                    else
+                        done(maybeInt { isInt = isInt, num = accum })
+                in
+                    getchar(eatChar)
+                end
         in
-            while buffer = " " | buffer = "\n" do
-                buffer := getchar();
-            any.any := isdigit(buffer);
-            while isdigit(buffer) do (
-                i := i * 10 + ord(buffer) - ord("0");
-                buffer := getchar()
-            );
-            i
+            nextDigit(0, 0)
         end
 
-    type list = {first: int, rest: list}
-
-    function readlist() : list =
-        let var any := any { any = 0 }
-            var i := readint(any)
-        in
-            if any.any then
-                list { first = i, rest = readlist() }
-            else (
-                buffer := getchar();
-                nil
+    function reverse(xs: list): list =
+        let function inner(xs: list, acc: list): list =
+            if xs <> nil then (
+                inner(xs.rest, list {
+                    first = xs.first,
+                    rest = acc
+                })
             )
+            else
+                acc
+        in
+            if xs <> nil then
+                inner(xs.rest, list {
+                    first = xs.first,
+                    rest = nil
+                })
+            else
+                xs
+        end
+
+    function readlist(done: listConsumer) =
+        let function next(acc: list) = (
+            readint(function(maybeInt: maybeInt) = (
+                if maybeInt.isInt then (
+                    let var first := maybeInt.num
+                    in
+                        next(list { first = first, rest = acc })
+                    end
+                )
+                else (
+                    let var rev := reverse(acc)
+                    in
+                        done(rev)
+                    end
+                )
+            ))
+        )
+        in
+            next(nil)
         end
 
     function merge(a: list, b: list) : list =
@@ -40,31 +70,35 @@ let type any = {any: int}
         else
             list { first = b.first, rest = merge(a, b.rest) }
 
-    function printint(i: int) =
-        let function f(i: int) =
-            if i > 0 then (
-                f(i / 10);
-                print(chr(i - i / 10 * 10 + ord("0")))
-            )
-        in
-            if i < 0 then (
-                print("-");
-                f(-i)
-            )
-            else if i > 0 then
-                f(i)
-            else
-                print("0")
-        end
+    function printint(i: int, c: cont) =
+        if i = 0 then
+            c()
+        else
+            let var rest := i / 10
+                var dig := i - rest * 10
+                function doDigit() =
+                    print(chr(dig + ord("0")), c)
+            in
+                printint(rest, doDigit)
+            end
 
-    function printlist(l: list) =
+    function printlist(l: list, c: cont) =
         if l = nil then
-            print("\n")
+            print("\n", c)
         else (
-            printint(l.first);
-            print(" ");
-            printlist(l.rest)
+            printint(l.first, function() =
+                print(" ", function() =
+                    printlist(l.rest, tigerExit)
+                )
+            )
         )
 in
-    printlist(merge(readlist(), readlist()))
+    readlist(function(list1: list) = (
+        getchar(function(char: string) = (
+            /* Ignore the character between the lists. */
+            readlist(function(list2: list) =
+                printlist(merge(list1, list2), tigerExit)
+            )
+        ))
+    ))
 end

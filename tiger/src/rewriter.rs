@@ -50,13 +50,6 @@ impl<'a> Rewriter<'a> {
                     typ,
                 }, pos)
             },
-            Expr::Assign { expr, var } => {
-                WithPos::new(Expr::Assign {
-                    expr: Box::new(self.rewrite(*expr)),
-                    var: Box::new(self.rewrite(*var)),
-                }, pos)
-            },
-            Expr::Break => WithPos::new(Expr::Break, pos),
             Expr::Call { args, function } => {
                 let mut new_args = vec![];
                 let mut declarations = vec![];
@@ -83,11 +76,11 @@ impl<'a> Rewriter<'a> {
                     add_declarations(call, declarations, pos)
                 }
             },
-            Expr::Closure { body, params, pure, result } => {
+            Expr::Closure { body, name, params, result } => {
                 WithPos::new(Expr::Closure {
                     body: Box::new(self.rewrite(*body)),
+                    name,
                     params,
-                    pure,
                     result,
                 }, pos)
             },
@@ -106,11 +99,6 @@ impl<'a> Rewriter<'a> {
                 WithPos::new(Expr::Field {
                     ident,
                     this: Box::new(self.rewrite(*this)),
-                }, pos)
-            },
-            Expr::FunctionPointer { label } => {
-                WithPos::new(Expr::FunctionPointer {
-                    label,
                 }, pos)
             },
             Expr::FunctionPointerCall { args, closure_name, function } => {
@@ -175,33 +163,6 @@ impl<'a> Rewriter<'a> {
                     declarations: new_declarations,
                 }, pos)
             },
-            Expr::MethodCall { args, method, this } => {
-                let mut new_args = vec![];
-                let mut declarations = vec![];
-                for arg in args {
-                    if can_extract(&arg) {
-                        let (name, declaration) = self.extract(arg);
-                        declarations.push(WithPos::new(declaration, pos));
-                        new_args.push(variable(name, pos));
-                    }
-                    else {
-                        new_args.push(self.rewrite(arg));
-                    }
-                }
-                let call = WithPos::new(Expr::MethodCall {
-                    args: new_args,
-                    method,
-                    this: Box::new(self.rewrite(*this)),
-                }, pos);
-
-                if declarations.is_empty() {
-                    call
-                }
-                else {
-                    add_declarations(call, declarations, pos)
-                }
-            },
-            Expr::New { class_name } => WithPos::new(Expr::New { class_name }, pos),
             Expr::Nil => WithPos::new(Expr::Nil, pos),
             Expr::Oper { left, right, oper } => {
                 let mut declarations = vec![];
@@ -281,31 +242,12 @@ impl<'a> Rewriter<'a> {
                 }, pos)
             },
             Expr::Variable(var) => WithPos::new(Expr::Variable(var), pos),
-            Expr::While { body, test } => {
-                // TODO: extract.
-                WithPos::new(Expr::While {
-                    body: Box::new(self.rewrite(*body)),
-                    test: Box::new(self.rewrite(*test)),
-                }, pos)
-            },
         }
     }
 
     fn rewrite_dec(&mut self, mut declaration: DeclarationWithPos) -> DeclarationWithPos {
         declaration.node =
             match declaration.node {
-                Declaration::ClassDeclaration { declarations, name, parent_class } => {
-                    let declarations =
-                        declarations
-                            .into_iter()
-                            .map(|declaration| self.rewrite_dec(declaration))
-                            .collect();
-                    Declaration::ClassDeclaration {
-                        declarations,
-                        name,
-                        parent_class,
-                    }
-                },
                 Declaration::Function(functions) => {
                     let mut new_functions = vec![];
                     for mut function in functions {
@@ -350,7 +292,7 @@ fn add_declarations(body: ExprWithPos, declarations: Vec<DeclarationWithPos>, po
 
 fn can_extract(expr: &ExprWithPos) -> bool {
     match expr.node {
-        Expr::Nil => false,
+        Expr::Nil | Expr::Variable(_) => false,
         _ => true,
     }
 }

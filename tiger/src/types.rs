@@ -19,55 +19,18 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use ast::ExprWithPos;
 use ir::Exp;
 use self::Type::*;
 use symbol::{Symbol, Symbols, SymbolWithPos};
-use temp::Label;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClassField {
-    pub name: Symbol,
-    pub typ: Type,
-    pub value: ExprWithPos,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FunctionType {
-    pub param_types: Vec<Type>,
-    pub return_type: Type,
-}
-
-impl FunctionType {
-    pub fn show(&self, symbols: &Symbols<()>) -> std::string::String {
-        let param_types = self.param_types.iter()
-            .map(|typ| typ.show(symbols))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("({}) -> {}", param_types, self.return_type.show(symbols))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClassMethod {
-    pub class_name: Symbol,
-    pub label: Label,
-    pub name: SymbolWithPos,
-    pub typ: FunctionType,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Array(Box<Type>, Unique),
     Answer,
-    Class {
-        data_layout: std::string::String,
-        fields: Vec<ClassField>,
-        methods: Vec<ClassMethod>,
-        name: Symbol,
-        parent_class: Option<SymbolWithPos>,
-        unique: Unique,
-        vtable_name: Label,
+    // TODO: check if this type is still needed to fix the GC issue.
+    Closure {
+        parameters: Vec<Type>,
+        return_type: Box<Type>,
     },
     Function {
         parameters: Vec<Type>,
@@ -90,7 +53,7 @@ pub enum Type {
 impl Type {
     pub fn is_pointer(&self) -> bool {
         match *self {
-            Array { .. } | Class { .. } | Record { .. } | String  => true,
+            Array { .. } | Closure { .. } | Record { .. } | String  => true,
             Name(_, ref typ) => {
                 if let Some(typ) = typ.as_ref() {
                     typ.is_pointer()
@@ -109,8 +72,7 @@ impl Type {
             Array(ref typ, _) => {
                 format!("[{}]", typ.show(symbols))
             },
-            Class { name, .. } => format!("class {}", symbols.name(name)),
-            Function { ref parameters, ref return_type } => {
+            Closure { ref parameters, ref return_type } | Function { ref parameters, ref return_type } => {
                 let show_parens = parameters.len() != 1;
                 let mut string = std::string::String::new();
                 if show_parens {
@@ -137,7 +99,19 @@ impl Type {
                 }
             },
             Nil => "nil".to_string(),
-            Record { name, .. } => format!("struct {}", symbols.name(name)),
+            Record { name, ref types, .. } => {
+                let mut string = format!("struct {} {{", symbols.name(name));
+                for &(ident, ref typ) in types {
+                     let ident = symbols.name(ident);
+                     string.push_str("    ");
+                     string.push_str(&ident);
+                     string.push_str(": ");
+                     string.push_str(&typ.show(symbols));
+                     string.push('\n');
+                }
+                string.push('}');
+                string
+            },
             String => "string".to_string(),
             Unit => "()".to_string(),
             Error => "type error".to_string(),

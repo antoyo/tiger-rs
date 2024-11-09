@@ -5,6 +5,6 @@ let var N := 8
   */
  */
 in
-    print("N\n")
+    print("N\n", tigerExit)
 end
 

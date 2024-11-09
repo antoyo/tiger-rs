@@ -19,8 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
@@ -30,6 +29,7 @@ use ast::{
     DeclarationWithPos,
     Expr,
     ExprWithPos,
+    Field,
     FieldWithPos,
     FuncDeclaration,
     Operator,
@@ -40,42 +40,35 @@ use ast::{
     TypeDecWithPos,
     TyWithPos,
 };
-use env::{Env, Entry};
+use env::{ClosureField, Env, Entry};
 use error::{Error, Result};
-use frame::{Fragment, Frame, Memory};
+use frame::{Frame, Memory};
 use gen;
 use gen::{
     Gen,
+    IR,
     Level,
     array_subscript,
     binary_oper,
-    class_create,
     field_access,
-    function_call,
     function_pointer_call,
-    goto,
     if_expression,
     init_array,
-    method_call,
     num,
     record_create,
     relational_oper,
     simple_var,
     string_equality,
-    unit,
     var_dec,
     var_decs,
-    while_loop,
 };
 use ir::{Exp, Statement, _Statement};
+use log::Logger;
 use position::{Pos, WithPos};
 use self::AddError::*;
 use symbol::{Strings, Symbol, Symbols, SymbolWithPos};
 use temp::{Label, TempMap};
 use types::{
-    ClassField,
-    ClassMethod,
-    FunctionType,
     Type,
     Unique,
 };
@@ -83,8 +76,6 @@ use visitor::Visitor;
 
 const CLOSURE_PARAM: &str = "__closure_param";
 const CLOSURE_FIELD: &str = "function_pointer";
-// Offset 2, because offset 0 is the object type (class) and offset 1 is the data layout.
-pub const VTABLE_OFFSET: usize = 2;
 
 #[derive(PartialEq)]
 enum AddError {
@@ -98,11 +89,6 @@ pub struct ExpTy {
     pub ty: Type,
 }
 
-pub enum FieldType {
-    Class,
-    Record,
-}
-
 const EXP_TYPE_ERROR: ExpTy =
     ExpTy {
         exp: Exp::Error,
@@ -113,35 +99,33 @@ pub struct SemanticAnalyzer<'a, F: Clone + Frame + 'a> {
     closure_index: usize,
     env: &'a mut Env<F>,
     errors: Vec<Error>,
-    escaping_vars: Vec<i64>,
+    escaping_vars: Vec<Vec<ClosureField>>,
+    escaping_var_locations: Vec<i64>,
     gen: Gen<F>,
-    in_closure: bool,
     in_loop: bool,
-    in_pure_fun: bool,
-    methods_level: HashMap<(Symbol, Symbol), Level<F>>,
-    self_symbol: Symbol,
     strings: Rc<Strings>,
     symbols: &'a mut Symbols<()>,
     temp_map: TempMap,
+
+    #[allow(dead_code)]
+    logger: Logger,
 }
 
 impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     pub fn new(env: &'a mut Env<F>, symbols: &'a mut Symbols<()>, strings: Rc<Strings>) -> Self {
-        let self_symbol = symbols.symbol("self");
         SemanticAnalyzer {
             closure_index: 0,
             env,
             errors: vec![],
             escaping_vars: vec![],
+            escaping_var_locations: vec![],
             gen: Gen::new(),
-            in_closure: false,
             in_loop: false,
-            in_pure_fun: false,
-            methods_level: HashMap::new(),
-            self_symbol,
             symbols,
             strings,
             temp_map: TempMap::new(),
+
+            logger: Logger::new(),
         }
     }
 
@@ -149,7 +133,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.errors.push(error);
     }
 
-    pub fn analyze(mut self, expr: ExprWithPos) -> Result<Vec<Fragment<F>>> {
+    pub fn analyze(mut self, expr: ExprWithPos) -> Result<IR<F>> {
         let main_symbol = self.symbols.symbol("main");
         let pos = expr.pos;
         let body = WithPos::new(
@@ -162,7 +146,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 body,
                 name: WithPos::dummy(main_symbol),
                 params: vec![],
-                pure: false,
                 result,
             }, pos)
         ]), pos), &gen::outermost(), None);
@@ -222,52 +205,58 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
-    fn check_function_types(&mut self, expected: &FunctionType, unexpected: &FunctionType, pos: Pos) {
-        if expected != unexpected {
-            self.add_error(Error::FunctionType {
-                expected: expected.clone(),
-                pos,
-                unexpected: unexpected.clone(),
-            });
+    fn compatible_types(&mut self, expected: &Type, unexpected: &Type) -> bool {
+        let expected = self.actual_ty(expected);
+        let unexpected = self.actual_ty(unexpected);
+        if expected != unexpected && expected != Type::Error && unexpected != Type::Error {
+            if let Type::Record { .. } = expected {
+                if unexpected == Type::Nil {
+                    return true;
+                }
+            }
+
+            if let (&Type::Function { parameters: ref left_parameters, return_type: ref left_return_type },
+                &Type::Closure { parameters: ref right_parameters, return_type: ref right_return_type }) =
+                (&expected, &unexpected)
+            {
+                let mut types_match = true;
+                if left_parameters.len() != right_parameters.len() {
+                    types_match = false;
+                }
+                for (left_param, right_param) in left_parameters.iter().zip(right_parameters) {
+                    if !self.compatible_types(left_param, right_param) {
+                        types_match = false;
+                    }
+                }
+                if !self.compatible_types(left_return_type, right_return_type) {
+                    types_match = false;
+                }
+
+                return types_match;
+            }
+            return false;
         }
+
+        true
     }
 
     fn check_types(&mut self, expected: &Type, unexpected: &Type, pos: Pos) {
         let expected = self.actual_ty(expected);
         let unexpected = self.actual_ty(unexpected);
         if expected != unexpected && expected != Type::Error && unexpected != Type::Error {
-            if let Type::Class { .. } | Type::Record { .. } = expected {
+            if let Type::Record { .. } = expected {
                 if unexpected == Type::Nil {
                     return;
                 }
             }
 
-            if let Type::Class { name: parent_class, .. } = expected {
-                if let Type::Class { name, .. } = unexpected {
-                    let mut current_class = name;
-                    loop {
-                        if current_class == parent_class {
-                            // NOTE: the expected type is a parent class.
-                            return;
-                        }
-                        let class = self.get_type(&WithPos::dummy(current_class), DontAddError);
-                        if let Type::Class { parent_class, .. } = class {
-                            if let Some(parent_class) = parent_class {
-                                current_class = parent_class.node;
-                            }
-                            else {
-                                break;
-                            }
-                        }
-                    }
-                }
+            if !self.compatible_types(&expected, &unexpected) {
+                self.add_error(Error::Type {
+                    expected,
+                    pos,
+                    unexpected,
+                });
             }
-
-            self.add_error(Error::Type {
-                expected,
-                pos,
-                unexpected,
-            });
         }
     }
 
@@ -311,200 +300,31 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         -> Option<Statement>
     {
         match declaration.node {
-            Declaration::ClassDeclaration { ref declarations, ref name, ref parent_class } => {
-                struct Method<F> {
-                    body: ExprWithPos,
-                    level: Level<F>,
-                    param_names: Vec<Symbol>,
-                    param_types: Vec<Type>,
-                    return_type: Type,
-                }
-
-                let empty_class_type = Type::Class {
-                    data_layout: String::new(),
-                    fields: vec![],
-                    methods: vec![],
-                    name: name.node,
-                    parent_class: Some(parent_class.clone()),
-                    unique: Unique::new(),
-                    vtable_name: Label::new(),
-                };
-                self.env.enter_type(name.node, empty_class_type);
-
-                let old_escaping_vars = mem::take(&mut self.escaping_vars);
-                let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-
-                let mut pending_methods = vec![];
-                let parent_type = self.get_type(parent_class, AddError);
-                match parent_type {
-                    Type::Class { .. } | Type::Error => (),
-                    _ => {
-                        self.add_error(Error::NotAClass {
-                            pos: parent_class.pos,
-                            typ: parent_type,
-                        });
-                    },
-                }
-                let (mut fields, mut data_layout, parent_methods) = self.parent_members(parent_class);
-                let mut methods = vec![];
-                for declaration in declarations {
-                    match declaration.node {
-                        Declaration::Function(ref functions) => {
-                            for function in functions {
-                                let params = &function.node.params;
-                                let mut param_names = vec![];
-                                let mut param_types = vec![];
-                                let mut param_set = HashSet::new();
-                                for param in params {
-                                    param_types.push(self.get_type(&param.node.typ, AddError));
-                                    param_names.push(param.node.name);
-                                    if !param_set.insert(param.node.name) {
-                                        self.duplicate_param(param);
-                                    }
-                                }
-                                let return_type =
-                                    if let Some(ref result) = function.node.result {
-                                        self.get_type(result, AddError)
-                                    }
-                                    else {
-                                        Type::Unit
-                                    };
-
-                                let mut formals: Vec<_> = params.iter()
-                                    .map(|param| self.env.look_escape(param.node.name))
-                                    .collect();
-                                formals.insert(0, true); // NOTE: self implicit parameter.
-                                let func_name = function.node.name.node;
-                                let label = self.method_label(name.node, func_name);
-                                let level = Level::new(parent_level, label.clone(), formals);
-                                self.methods_level.insert((name.node, func_name), level.clone());
-                                methods.push(ClassMethod {
-                                    class_name: name.node,
-                                    label,
-                                    name: function.node.name.clone(),
-                                    typ: FunctionType {
-                                        param_types: param_types.clone(),
-                                        return_type: return_type.clone(),
-                                    },
-                                });
-
-                                pending_methods.push(Method {
-                                    body: function.node.body.clone(),
-                                    level,
-                                    param_names,
-                                    param_types,
-                                    return_type,
-                                });
-                            }
-                        },
-                        Declaration::VariableDeclaration { ref init, name, ref typ, .. } => {
-                            let exp = self.trans_exp(init, parent_level, done_label.clone(), true);
-                            let is_pointer =
-                                match exp.ty {
-                                    Type::Name(ref symbol, None) if symbol.node == name =>
-                                        true,
-                                    _ => self.actual_ty(&exp.ty).is_pointer(),
-                                };
-                            let typ =
-                                if let Some(ref typ) = *typ {
-                                    let typ = self.get_type(typ, AddError);
-                                    self.check_types(&typ, &exp.ty, init.pos);
-                                    typ
-                                }
-                                else {
-                                    exp.ty
-                                };
-                            if is_pointer {
-                                data_layout.push('p')
-                            }
-                            else {
-                                data_layout.push('n')
-                            }
-                            fields.push(ClassField {
-                                name,
-                                typ,
-                                value: init.clone(),
-                            });
-                        },
-                        _ => unreachable!("cannot get that kind of declaration in a class"),
-                    }
-                }
-                let class_name = self.strings.get(name.node).expect("string get");
-                let vtable_name = Label::with_name(&format!("__vtable_{}", class_name));
-                let methods = self.inherit_methods(parent_methods, &methods);
-                let class_type = Type::Class {
-                    data_layout,
-                    fields,
-                    methods: methods.clone(),
-                    name: name.node,
-                    parent_class: Some(parent_class.clone()),
-                    unique: Unique::new(),
-                    vtable_name: vtable_name.clone(),
-                };
-                self.env.replace_type(name.node, class_type.clone());
-
-                for method in pending_methods {
-                    let body = &method.body;
-                    self.env.begin_scope();
-                    let mut formals = method.level.formals().into_iter();
-                    self.env.enter_var(self.self_symbol, Entry::Var {
-                        access: formals.next().expect("self parameter").clone(),
-                        typ: class_type.clone(),
-                    });
-                    let fields =
-                        match class_type {
-                            Type::Class { ref fields, .. } => fields,
-                            _ => unreachable!(),
-                        };
-                    for field in fields {
-                        self.env.enter_var(field.name, Entry::ClassField { class: class_type.clone() });
-                    }
-                    for ((param, name), access) in method.param_types.into_iter().zip(method.param_names).zip(formals) {
-                        self.env.enter_var(name, Entry::Var { access, typ: param });
-                    }
-                    let exp = self.trans_exp(body, &method.level, done_label.clone(), true);
-                    self.check_types(&method.return_type, &exp.ty, body.pos);
-                    let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::take(&mut self.escaping_vars);
-                    self.gen.proc_entry_exit(&method.level, exp.exp, current_temp_map, escaping_vars);
-                    self.env.end_scope();
-                }
-
-                let method_labels: Vec<_> = methods.iter()
-                    .map(|method| method.label.clone())
-                    .collect();
-                self.gen.vtable(vtable_name, method_labels);
-
-                self.escaping_vars = old_escaping_vars;
-                self.temp_map = old_temp_map;
-
-                None
-            },
             Declaration::Function(ref declarations) => {
                 let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                let old_escaping_vars = mem::take(&mut self.escaping_vars);
+                let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
                 let mut levels = vec![];
-                for &WithPos { node: FuncDeclaration { ref body, ref name, ref params, pure, ref result, .. }, .. } in declarations {
-                    let func_name = name.node;
+                for &WithPos { node: FuncDeclaration { ref name, ref params, ref result, .. }, .. } in declarations {
+                    let func_symbol = name.node;
+                    let func_name = self.strings.get(func_symbol).expect("string get");
                     let formals = params.iter()
                         .map(|param| self.env.look_escape(param.node.name))
                         .collect();
-                    let level = Level::new(parent_level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
+                    let level = Level::new(parent_level, Label::with_name(&func_name), formals);
                     let result_type =
                         if let Some(ref result) = *result {
                             self.get_type(result, AddError)
                         }
-                        else if pure {
-                            Type::Answer
-                        }
                         else {
-                            Type::Unit
+                            Type::Answer
                         };
                     // TODO: error when name already exist?
                     let mut param_names = vec![];
                     let mut parameters = vec![];
+                    let mut param_type_symbols = vec![];
                     let mut param_set = HashSet::new();
                     for param in params {
+                        param_type_symbols.push(param.node.typ.clone());
                         parameters.push(self.get_type(&param.node.typ, AddError));
                         param_names.push(param.node.name);
                         if !param_set.insert(param.node.name) {
@@ -513,53 +333,58 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     }
                     levels.push(level.clone());
 
-                    let env_fields = find_closure_environment(body, self.env, level.clone());
-
-                    self.env.enter_var(func_name, Entry::Fun {
-                        access_outside_vars: !env_fields.is_empty(),
+                    self.env.enter_var(func_symbol, Entry::Fun {
                         external: false,
-                        label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
-                        level,
+                        label: Label::with_name(&func_name),
                         parameters,
-                        pure,
+                        param_type_symbols,
                         result: result_type.clone(),
+                        result_symbol: result.clone(),
                     });
                 }
 
-                let old_in_pure_fun = self.in_pure_fun;
-                for (&WithPos { node: FuncDeclaration { ref params, ref body, pure, ref result, .. }, .. }, level) in
+                for (&WithPos { node: FuncDeclaration { ref params, ref body, ref result, .. }, .. }, level) in
                     declarations.iter().zip(&levels)
                 {
-                    self.in_pure_fun = pure;
                     let result_type =
                         if let Some(ref result) = *result {
                             self.get_type(result, DontAddError)
                         }
-                        else if pure {
-                            Type::Answer
-                        }
                         else {
-                            Type::Unit
+                            Type::Answer
                         };
                     let mut param_names = vec![];
                     let mut parameters = vec![];
+                    self.escaping_vars.push(vec![]);
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, DontAddError));
+                        let param_type = self.get_type(&param.node.typ, DontAddError);
+                        if self.env.look_escape(param.node.name) {
+                            self.escaping_vars.last_mut().expect("scope")
+                                .push(ClosureField {
+                                    ident: param.node.name,
+                                    typ: param_type.clone(),
+                                });
+                        }
+                        parameters.push(param_type);
                         param_names.push(param.node.name);
                     }
                     self.env.begin_scope();
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(level.formals().into_iter()) {
+                        if type_is_collectable(&param) {
+                            self.temp_map.insert::<F>(&access.1);
+                        }
                         self.env.enter_var(name, Entry::Var { access, typ: param });
                     }
+
                     let exp = self.trans_exp(body, level, done_label.clone(), true);
                     self.check_types(&result_type, &exp.ty, body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::take(&mut self.escaping_vars);
-                    self.gen.proc_entry_exit(level, exp.exp, current_temp_map, escaping_vars);
+                    let escaping_var_locations = mem::take(&mut self.escaping_var_locations);
+                    self.gen.proc_entry_exit(level, exp.exp, current_temp_map, escaping_var_locations);
                     self.env.end_scope();
+                    self.escaping_vars.pop();
                 }
-                self.in_pure_fun = old_in_pure_fun;
-                self.escaping_vars = old_escaping_vars;
+                self.escaping_var_locations = old_escaping_vars;
                 self.temp_map = old_temp_map;
                 None
             },
@@ -576,13 +401,41 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 None
             },
             Declaration::VariableDeclaration { ref init, name, ref typ, .. } => {
+                let closure_type =
+                    if let Expr::Closure { ref params, ref result, .. } = init.node {
+                        let return_type =
+                            if let Some(ref result) = *result {
+                                self.get_type(result, AddError)
+                            }
+                            else {
+                                Type::Answer
+                            };
+                        let mut parameters = vec![];
+                        for param in params {
+                            parameters.push(self.get_type(&param.node.typ, DontAddError));
+                        }
+                        Some(Type::Closure {
+                            parameters,
+                            return_type: Box::new(return_type),
+                        })
+                    }
+                    else {
+                        None
+                    };
+                let mut access = gen::alloc_local(parent_level, false);
+                if let Some(ref typ) = closure_type {
+                    access = gen::alloc_local(parent_level, true);
+                    self.env.enter_var(name, Entry::Var { access: access.clone(), typ: typ.clone() });
+                }
                 let exp = self.trans_exp(init, parent_level, done_label, true);
-                let is_collectable = type_is_collectable(&exp.ty);
                 let escape = self.env.look_escape(name);
-                let access = gen::alloc_local(parent_level, escape || is_collectable); // TODO: check if this is necessary.
+                let is_collectable = type_is_collectable(&exp.ty);
+                if closure_type.is_none() {
+                    access = gen::alloc_local(parent_level, escape || is_collectable); // TODO: check if this is necessary.
+                }
                 if escape {
                     if let Some(stack_var) = access.1.as_stack() {
-                        self.escaping_vars.push(stack_var);
+                        self.escaping_var_locations.push(stack_var);
                     }
                 }
                 if is_collectable {
@@ -595,8 +448,17 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.add_error(Error::RecordType { pos: declaration.pos });
                     return None;
                 }
+                if escape {
+                    self.escaping_vars.last_mut().expect("scope")
+                        .push(ClosureField {
+                            ident: name,
+                            typ: exp.ty.clone(),
+                        });
+                }
                 let var = var_dec(&access, exp.exp);
-                self.env.enter_var(name, Entry::Var { access, typ: exp.ty });
+                if closure_type.is_none() {
+                    self.env.enter_var(name, Entry::Var { access, typ: exp.ty });
+                }
                 Some(var)
             },
         }
@@ -615,7 +477,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         let access = gen::alloc_local(level, true);
                         self.temp_map.insert::<F>(&access.1);
                         if let Some(stack_var) = access.1.as_stack() {
-                            self.escaping_vars.push(stack_var);
+                            self.escaping_var_locations.push(stack_var);
                         }
                         Some(access)
                     }
@@ -636,101 +498,54 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 self.check_types(inner_type, &init_expr.ty, init.pos);
                 let is_pointer = self.array_contains_pointer(&ty);
                 let is_pointer = num(is_pointer as i64);
-                let exp = init_array::<F>(var, size_expr.exp, is_pointer, init_expr.exp, level, self.in_closure);
+                let exp = init_array::<F>(var, size_expr.exp, is_pointer, init_expr.exp, level);
                 ExpTy {
                     exp,
                     ty,
                 }
             },
-            Expr::Assign { ref expr, ref var } => {
-                if self.in_pure_fun {
-                    self.add_error(Error::CannotAssignInPureFun {
-                        pos,
-                    });
-                    return EXP_TYPE_ERROR;
-                }
-                match var.node {
-                    Expr::Field { .. } | Expr::Subscript { .. } | Expr::Variable(_) => (),
-                    _ => self.add_error(Error::Assign {
-                        pos: var.pos,
-                    }),
-                }
-                let var = self.trans_exp(var, level, done_label.clone(), true);
-                let expr_expr = self.trans_exp(expr, level, done_label, true);
-                self.check_types(&var.ty, &expr_expr.ty, expr.pos);
-                ExpTy {
-                    exp: Exp::ExpSequence(Box::new(_Statement::Move(var.exp, expr_expr.exp).into()), Box::new(unit())),
-                    ty: Type::Unit,
-                }
-            },
-            Expr::Break => {
-                if !self.in_loop {
-                    self.add_error(Error::BreakOutsideLoop {
-                        pos: expr.pos,
-                    });
-                    return EXP_TYPE_ERROR;
-                }
-                ExpTy {
-                    exp: goto(done_label.expect("break should be in while loop")),
-                    ty: Type::Unit,
-                }
-            },
             Expr::Call { ref args, ref function } => {
-                match function.node {
-                    Expr::Variable(ref func) => {
-                        match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
-                            Some(Entry::Fun { external, ref label, ref parameters, ref result, level: ref current_level, pure, .. }) => {
-                                if self.in_pure_fun && !pure {
-                                    self.add_error(Error::CannotCallImpureFun {
-                                        pos,
-                                    });
-                                }
+                if let Expr::Variable(ref func) = function.node {
+                    match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
+                        Some(Entry::Fun { external, ref label, ref parameters, ref result, .. }) => {
+                            if parameters.len() != args.len() {
+                                self.add_error(Error::InvalidNumberOfParams {
+                                    actual: args.len(),
+                                    expected: parameters.len(),
+                                    pos,
+                                });
+                            }
 
-                                let mut expr_args = vec![];
-                                if parameters.len() != args.len() {
-                                    self.add_error(Error::InvalidNumberOfParams {
-                                        actual: args.len(),
-                                        expected: parameters.len(),
-                                        pos,
-                                    });
-                                }
-                                for (arg, param) in args.iter().zip(parameters) {
-                                    let exp = self.trans_exp(arg, level, done_label.clone(), true);
-                                    self.check_types(param, &exp.ty, arg.pos);
-                                    expr_args.push(exp.exp);
-                                }
-                                let collectable_return_type = type_is_collectable(result);
-                                let exp =
-                                    if external {
-                                        F::external_call(&label.to_name(), expr_args, collectable_return_type)
-                                    }
-                                    else {
-                                        function_call(label, expr_args, level, current_level, collectable_return_type, self.in_closure)
-                                    };
-                                ExpTy {
-                                    exp,
+                            let mut expr_args = vec![];
+                            for (arg, param) in args.iter().zip(parameters) {
+                                let exp = self.trans_exp(arg, level, done_label.clone(), true);
+                                self.check_types(param, &exp.ty, arg.pos);
+                                expr_args.push(exp.exp);
+                            }
+
+                            let collectable_return_type = type_is_collectable(result);
+
+                            if external {
+                                return ExpTy {
+                                    exp: F::external_call(&label.to_name(), expr_args, collectable_return_type),
                                     ty: self.actual_ty(result),
-                                }
-                            },
-                            Some(_) => self.closure_call(function, args, level, done_label),
-                            None => self.undefined_function(func.node, func.pos),
-                        }
-                    },
-                    _ => self.closure_call(function, args, level, done_label),
+                                };
+                            }
+                        },
+                        None => return self.undefined_function(func.node, func.pos),
+                        _ => (),
+                    }
                 }
+                self.closure_call(function, args, level, done_label)
             },
-            Expr::Closure { ref body, ref params, pure, ref result } => {
+            Expr::Closure { ref body, ref name, ref params, ref result } => {
                 let mut data_layout = String::new();
                 data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
 
-                let name = format!("__closure_{}", self.closure_index);
-                let func_name = self.symbols.symbol(&name);
+                let func_name = name.node;
                 let formals: Vec<_> = params.iter()
                     .map(|param| self.env.look_escape(param.node.name))
                     .collect();
-                // NOTE: do not push a formal for the closure (environment), because Level::new()
-                // already push a formal for the static link that we can reuse since closures don't
-                // have static link.
                 let func_level = Level::new(level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
                 let closure_level = func_level.formals().last().expect("closure access").0.clone();
 
@@ -753,6 +568,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let data_layout = self.gen.string_literal(data_layout);
 
                 let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
+                self.closure_index += 1;
                 let record_type = Type::Record {
                     data_layout,
                     name: closure_symbol,
@@ -766,7 +582,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         body: *body.clone(),
                         name: WithPos::new(func_name, pos),
                         params: params.clone(),
-                        pure: false,
                         result: result.clone(),
                     };
 
@@ -774,18 +589,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     if let Some(ref result) = *result {
                         self.get_type(result, AddError)
                     }
-                    else if pure {
-                        Type::Answer
-                    }
                     else {
-                        Type::Unit
+                        Type::Answer
                     };
 
                 {
                     let old_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let old_escaping_vars = mem::take(&mut self.escaping_vars);
-                    let old_in_closure = self.in_closure;
-                    self.in_closure = true;
+                    let old_escaping_vars = mem::take(&mut self.escaping_var_locations);
 
                     // TODO: error when name already exist?
                     let mut param_names = vec![];
@@ -798,37 +608,47 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             self.duplicate_param(param);
                         }
                     }
-                    param_names.push(self.symbols.symbol(CLOSURE_PARAM));
+                    let closure_param_symbol = self.symbols.symbol(CLOSURE_PARAM);
+                    param_names.push(closure_param_symbol);
                     parameters.push(record_type.clone());
-                    self.env.enter_var(func_name, Entry::Fun {
-                        access_outside_vars: false, // False because the outside variables are in the closure environment.
-                        external: false,
-                        label: Label::with_name(&self.strings.get(func_name).expect("strings get")),
-                        level: func_level.clone(),
-                        parameters: parameters.clone(),
-                        pure: false,
-                        result: result_type.clone(),
-                    });
 
                     self.env.begin_scope();
                     for field in &env_fields {
                         self.env.enter_var(field.ident, Entry::RecordField { record: record_type.clone() });
                     }
+
+                    let closure_type = parameters.last().expect("closure parameter").clone();
+                    let mut function_type = None;
+                    if let Type::Record { ref types, .. } = closure_type {
+                        for &(ident, ref typ) in types {
+                            if ident == name.node {
+                                function_type = Some(typ.clone());
+                            }
+                        }
+                    }
+                    let function_type = function_type.unwrap_or(closure_type);
+                    let access = func_level.formals().last().expect("closure formal").clone();
+                    self.env.enter_var(name.node, Entry::Var { access, typ: function_type });
+
                     for ((param, name), access) in parameters.into_iter().zip(param_names).zip(func_level.formals().into_iter()) {
+                        if type_is_collectable(&param) {
+                            self.temp_map.insert::<F>(&access.1);
+                        }
                         self.env.enter_var(name, Entry::Var { access, typ: param });
                     }
+                    self.env.enter_escape(closure_param_symbol, false);
+
                     // TODO: forbid declaring normal functions in closure (because they could
                     // access variables from outside the closure)?
                     // Or could we just put the variables in the closure?
                     let exp = self.trans_exp(&function.body, &func_level, done_label.clone(), true);
                     self.check_types(&result_type, &exp.ty, function.body.pos);
                     let current_temp_map = mem::replace(&mut self.temp_map, TempMap::new());
-                    let escaping_vars = mem::take(&mut self.escaping_vars);
-                    self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_vars);
+                    let escaping_var_locations = mem::take(&mut self.escaping_var_locations);
+                    self.gen.proc_entry_exit(&func_level, exp.exp, current_temp_map, escaping_var_locations);
                     self.env.end_scope();
 
-                    self.in_closure = old_in_closure;
-                    self.escaping_vars = old_escaping_vars;
+                    self.escaping_var_locations = old_escaping_vars;
                     self.temp_map = old_temp_map;
                 }
 
@@ -837,14 +657,12 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     parameters.push(self.get_type(&param.node.typ, DontAddError));
                 }
 
-                let ty = Type::Function {
+                let ty = Type::Closure {
                     parameters,
                     return_type: Box::new(result_type),
                 };
 
-                self.closure_index += 1;
-
-                let label = self.symbols.symbol(&name);
+                let label = func_name;
                 let mut fields = vec![WithPos::new(RecordField {
                     expr: WithPos::new(Expr::ClosurePointer {
                         label,
@@ -860,9 +678,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
 
                 let closure = self.trans_exp(&WithPos::new(Expr::Record {
-                    fields,
-                    typ: WithPos::new(closure_symbol, pos),
-                }, pos), level, done_label, true);
+                        fields,
+                        typ: WithPos::new(closure_symbol, pos),
+                    }, pos), level, done_label, true);
                 ExpTy {
                     exp: closure.exp,
                     ty,
@@ -872,35 +690,24 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let var = self.trans_exp(this, level, done_label, true);
                 if ident.node == self.symbols.symbol(CLOSURE_FIELD) {
                     return ExpTy {
-                        exp: field_access::<F>(var.exp, 0, FieldType::Record), // TODO: do we really want to hard-code this?
+                        exp: field_access::<F>(var.exp, 0), // TODO: do we really want to hard-code this?
                         ty: var.ty.clone(),
                     };
                 }
-                self.add_error(Error::NotARecordOrClass {
+                self.add_error(Error::NotARecord {
                     pos: this.pos,
                     typ: var.ty,
                 });
                 EXP_TYPE_ERROR
             },
             Expr::Field { ref ident, ref this } => {
-                let var = self.trans_exp(this, level, done_label, true);
+                let var = self.trans_exp(this, level, done_label.clone(), true);
                 match var.ty {
-                    Type::Class { name: class_type, ref fields, .. } => {
-                        for (index, class_field) in fields.iter().enumerate() {
-                            if class_field.name == ident.node {
-                                return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Class),
-                                    ty: class_field.typ.clone(),
-                                };
-                            }
-                        }
-                        self.unexpected_field(ident, ident.pos, class_type)
-                    },
                     Type::Record { name: record_type, ref types, .. } => {
                         for (index, &(name, ref typ)) in types.iter().enumerate() {
                             if name == ident.node {
                                 return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Record),
+                                    exp: field_access::<F>(var.exp, index),
                                     ty: typ.clone(),
                                 };
                             }
@@ -909,7 +716,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     },
                     Type::Error => EXP_TYPE_ERROR,
                     typ => {
-                        self.add_error(Error::NotARecordOrClass {
+                        self.add_error(Error::NotARecord {
                             pos: this.pos,
                             typ,
                         });
@@ -923,19 +730,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     ty: Type::Int,
                 }
             },
-            Expr::FunctionPointer { ref label } => {
-                ExpTy {
-                    exp: Exp::Name(label.clone()),
-                    ty: Type::Int,
-                }
-            },
             Expr::FunctionPointerCall { ref args, closure_name, ref function } => {
                 let pos = function.pos;
                 let function = self.trans_exp(function, level, done_label.clone(), true);
 
                 let (parameters, result) =
                     match function.ty {
-                        Type::Function { ref parameters, ref return_type, .. } => (parameters, return_type),
+                        Type::Closure { ref parameters, ref return_type } | Type::Function { ref parameters, ref return_type } => (parameters, return_type),
                         Type::Error => return EXP_TYPE_ERROR,
                         _ => return self.not_callable(&function.ty, pos),
                     };
@@ -1004,81 +805,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 ExpTy {
                     exp: var_decs(vars, result.exp),
                     ty: result.ty,
-                }
-            },
-            Expr::MethodCall { ref args, ref method, ref this } => {
-                let this = self.trans_exp(this, level, done_label.clone(), true);
-                let methods =
-                    match this.ty {
-                        Type::Class { ref methods, .. } => {
-                            methods
-                        },
-                        _ => {
-                            return self.undefined_method(method.node, method.pos)
-                        },
-                    };
-
-                for (index, class_method) in methods.iter().enumerate() {
-                    if method.node == class_method.name.node {
-                        let mut expr_args = vec![this.exp];
-                        let method_type = &class_method.typ;
-                        if method_type.param_types.len() != args.len() {
-                            self.add_error(Error::InvalidNumberOfParams {
-                                actual: args.len(),
-                                expected: method_type.param_types.len(),
-                                pos,
-                            });
-                        }
-                        for (arg, param) in args.iter().zip(method_type.param_types.iter()) {
-                            let exp = self.trans_exp(arg, level, done_label.clone(), true);
-                            self.check_types(param, &exp.ty, arg.pos);
-                            expr_args.push(exp.exp);
-                        }
-                        let result = &method_type.return_type;
-                        let collectable_return_type = type_is_collectable(result);
-                        let current_level = self.methods_level.get(&(class_method.class_name, method.node)).expect("level");
-                        let exp = method_call(index, expr_args, level, current_level, collectable_return_type, self.in_closure);
-                        return ExpTy {
-                            exp,
-                            ty: self.actual_ty(result),
-                        }
-                    }
-                }
-
-                self.undefined_method(method.node, method.pos)
-            },
-            Expr::New { ref class_name } => {
-                // TODO: forbid calling new Object?
-                let class = self.get_type(class_name, AddError);
-                let (data_layout, fields, vtable_name) =
-                    match class {
-                        Type::Class { ref data_layout, ref fields, ref vtable_name, .. } => {
-                            (self.gen.string_literal(data_layout.clone()), fields.clone(), vtable_name.clone())
-                        },
-                        Type::Error => (Exp::Error, vec![], Label::new()),
-                        _ => {
-                            self.add_error(Error::UnexpectedType {
-                                kind: "record".to_string(),
-                                pos: class_name.pos,
-                            });
-                            return EXP_TYPE_ERROR;
-                        },
-                    };
-                // NOTE: we put the class on the stack immediately, because it could contain
-                // heap-allocated values, which could causes the heap to be moved.
-                let access = gen::alloc_local(level, true);
-                self.temp_map.insert::<F>(&access.1);
-                if let Some(stack_var) = access.1.as_stack() {
-                    self.escaping_vars.push(stack_var);
-                }
-                let mut field_exprs = vec![];
-                for field in &fields {
-                    field_exprs.push(self.trans_exp(&field.value, level, done_label.clone(), false).exp);
-                }
-                let exp = class_create::<F>(access, data_layout, field_exprs, vtable_name, self.in_closure);
-                ExpTy {
-                    exp,
-                    ty: class,
                 }
             },
             Expr::Nil =>
@@ -1216,73 +942,51 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Variable(ref ident) => {
                 match self.env.look_var(ident.node).cloned() { // TODO: remove this clone.
                     Some(Entry::Var { ref access, ref typ, }) => {
+                        let exp = simple_var(access.clone(), level);
                         ExpTy {
-                            exp: simple_var(access.clone(), level, self.in_closure),
+                            exp,
                             ty: self.actual_ty(typ),
                         }
                     },
-                    Some(Entry::ClassField { class }) => {
-                        let fields =
-                            match class {
-                                Type::Class { ref fields, .. } => fields,
-                                _ => unreachable!(),
-                            };
-                        for (index, class_field) in fields.iter().enumerate() {
-                            if class_field.name == ident.node {
-                                let this = self.trans_exp(&WithPos::dummy(Expr::Variable(WithPos::dummy(self.self_symbol))),
-                                    level, done_label, true);
-                                return ExpTy {
-                                    exp: field_access::<F>(this.exp, index, FieldType::Class),
-                                    ty: class_field.typ.clone(),
-                                };
+                    Some(Entry::Fun { external, ref parameters, ref param_type_symbols, ref result, ref result_symbol, .. }) => {
+                        let closure =
+                            if external {
+                                let mut args = vec![];
+                                let mut params = vec![];
+                                for (index, param) in param_type_symbols.iter().enumerate() {
+                                    let name = self.symbols.symbol(&format!("__arg{}", index));
+                                    args.push(WithPos::new(Expr::Variable(WithPos::new(name, pos)), pos));
+                                    self.env.enter_escape(name, false);
+                                    params.push(WithPos::new(
+                                        Field {
+                                            escape: false,
+                                            name,
+                                            typ: param.clone(),
+                                        },
+                                        pos,
+                                    ));
+                                }
+                                Expr::Closure {
+                                    body: Box::new(WithPos::new(Expr::Call {
+                                        args,
+                                        function: Box::new(WithPos::new(Expr::Variable(ident.clone()), pos)),
+                                    }, pos)),
+                                    name: WithPos::new(self.symbols.symbol(&format!("_closure_{}", self.strings.get(ident.node).expect("get function name"))), pos),
+                                    params,
+                                    result: result_symbol.clone(),
+                                }
                             }
-                        }
-                        unreachable!();
-                    },
-                    Some(Entry::Fun { access_outside_vars, ref label, ref parameters, ref result, .. }) => {
-                        // Create an empty closure for the function.
-                        if access_outside_vars {
-                            self.add_error(Error::CannotAccessOutsideVars {
-                                pos,
-                            });
-                            return EXP_TYPE_ERROR;
-                        }
+                            else {
+                                unreachable!();
+                            };
 
-                        let mut data_layout = String::new();
-                        data_layout.push('n'); // First field is the function pointer, which is not heap-allocated.
-                        let data_layout = self.gen.string_literal(data_layout);
-
-                        let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
-
-                        let types = vec![(function_pointer_symbol, Type::Int)];
-
-                        let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
-                        let record_type = Type::Record {
-                            data_layout,
-                            name: closure_symbol,
-                            types,
-                            unique: Unique::new(),
-                        };
-                        self.env.enter_type(closure_symbol, record_type.clone());
-
-                        let ty = Type::Function {
+                        let ty = Type::Closure { // TODO: check if it should always be a closure.
                             parameters: parameters.clone(),
                             return_type: Box::new(result.clone()),
                         };
 
-                        self.closure_index += 1;
+                        let closure = self.trans_exp(&WithPos::new(closure, pos), level, done_label, true);
 
-                        let fields = vec![WithPos::new(RecordField {
-                            expr: WithPos::new(Expr::FunctionPointer {
-                                label: label.clone(),
-                            }, pos),
-                            ident: function_pointer_symbol,
-                        }, pos)];
-
-                        let closure = self.trans_exp(&WithPos::new(Expr::Record {
-                            fields,
-                            typ: WithPos::new(closure_symbol, pos),
-                        }, pos), level, done_label, true);
                         ExpTy {
                             exp: closure.exp,
                             ty,
@@ -1300,7 +1004,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 let this = self.trans_exp(&WithPos::dummy(Expr::Variable(WithPos::dummy(closure_symbol))),
                                     level, done_label, true);
                                 return ExpTy {
-                                    exp: field_access::<F>(this.exp, index, FieldType::Record),
+                                    exp: field_access::<F>(this.exp, index),
                                     ty: typ.clone(),
                                 };
                             }
@@ -1308,26 +1012,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         unreachable!();
                     },
                     _ => self.undefined_variable(ident.node, ident.pos),
-                }
-            },
-            Expr::While { ref body, ref test } => {
-                if self.in_pure_fun {
-                    self.add_error(Error::NoLoopInPureFun {
-                        pos,
-                    });
-                    return EXP_TYPE_ERROR;
-                }
-
-                let test_expr = self.trans_exp(test, level, done_label, true);
-                self.check_int(&test_expr, test.pos);
-                let old_in_loop = self.in_loop;
-                self.in_loop = true;
-                let while_done_label = Label::new();
-                let result = self.trans_exp(body, level, Some(while_done_label.clone()), true);
-                self.in_loop = old_in_loop;
-                ExpTy {
-                    exp: while_loop(&while_done_label, test_expr.exp, result.exp),
-                    ty: result.ty,
                 }
             },
         }
@@ -1343,7 +1027,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let parameters = parameters.iter()
                     .map(|param| self.trans_ty(name, param))
                     .collect();
-                Type::Function {
+                Type::Closure {
                     parameters,
                     return_type: Box::new(self.trans_ty(name, return_type)),
                 }
@@ -1388,52 +1072,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
-    fn method_label(&self, class: Symbol, method: Symbol) -> Label {
-        Label::with_name(&format!("{}_{}",
-            self.strings.get(class).expect("strings get"),
-            self.strings.get(method).expect("strings get"),
-        ))
-    }
-
-    fn parent_members(&mut self, class: &SymbolWithPos) -> (Vec<ClassField>, String, Vec<ClassMethod>) {
-        let mut parent_fields = vec![];
-        let mut parent_data_layout = vec![];
-        let mut parent_methods: Vec<ClassMethod> = vec![];
-        let mut parent = self.get_type(class, DontAddError);
-        while let Type::Class { ref data_layout, ref fields, name, ref methods, ref parent_class, .. } = parent {
-            parent_fields.push(fields.clone());
-            parent_data_layout.push(data_layout.clone());
-
-            for method in methods {
-                if let Some(parent_method) = parent_methods.iter_mut().find(|parent_method| parent_method.name == method.name) {
-                    parent_method.label = method.label.clone();
-                }
-                else {
-                    parent_methods.push(ClassMethod {
-                        class_name: name,
-                        label: method.label.clone(),
-                        name: method.name.clone(),
-                        typ: method.typ.clone(),
-                    });
-                }
-            }
-
-            if let Some(ref parent_class) = *parent_class {
-                parent = self.get_type(parent_class, DontAddError);
-            }
-            else {
-                break;
-            }
-        }
-        let fields = parent_fields.into_iter().rev()
-            .flatten()
-            .collect();
-        let data_layout = parent_data_layout.into_iter().rev()
-            .collect::<Vec<_>>()
-            .join("");
-        (fields, data_layout, parent_methods)
-    }
-
     fn duplicate_param(&mut self, param: &FieldWithPos) {
         let ident = self.env.var_name(param.node.name);
         self.add_error(Error::DuplicateParam {
@@ -1451,20 +1089,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             struct_name,
         });
         EXP_TYPE_ERROR
-    }
-
-    fn inherit_methods(&mut self, parent_methods: Vec<ClassMethod>, method_labels: &[ClassMethod]) -> Vec<ClassMethod> {
-        let mut labels = parent_methods.clone();
-        for method in method_labels {
-            if let Some(index) = parent_methods.iter().position(|parent_method| parent_method.name == method.name) {
-                self.check_function_types(&parent_methods[index].typ, &method.typ, method.name.pos);
-                labels[index] = method.clone();
-            }
-            else {
-                labels.push(method.clone());
-            }
-        }
-        labels
     }
 
     fn missing_field(&mut self, field_type: Symbol, typ: &SymbolWithPos) -> ExpTy {
@@ -1491,16 +1115,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.add_error(Error::Undefined {
             ident,
             item: "function".to_string(),
-            pos,
-        });
-        EXP_TYPE_ERROR
-    }
-
-    fn undefined_method(&mut self, ident: Symbol, pos: Pos) -> ExpTy {
-        let ident = self.env.var_name(ident);
-        self.add_error(Error::Undefined {
-            ident,
-            item: "method".to_string(),
             pos,
         });
         EXP_TYPE_ERROR
@@ -1538,27 +1152,6 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-struct ClosureField {
-    ident: Symbol,
-    typ: Type,
-}
-
-impl Eq for ClosureField {
-}
-
-impl PartialOrd for ClosureField {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ClosureField {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.ident.cmp(&other.ident)
-    }
-}
-
 struct EnvFinder<'a, F: Frame> {
     closure_level: Level<F>,
     env: &'a Env<F>,
@@ -1577,21 +1170,42 @@ impl<'a, F: Frame> EnvFinder<'a, F> {
 
 #[allow(clippy::needless_lifetimes)]
 impl<'a, F: Frame + PartialEq> Visitor for EnvFinder<'a, F> {
+    fn visit_closure(&mut self, body: &ExprWithPos) {
+        self.visit_exp(body);
+    }
+
     fn visit_var(&mut self, ident: &SymbolWithPos) {
-        // TODO: panic if trying to access a var from static link?
-        // TODO: support class field as well?
-        if let Some(&Entry::Var { ref access, ref typ, }) = self.env.look_var(ident.node) {
-            if self.closure_level.current != access.0.current {
-                self.fields.insert(ClosureField {
-                    ident: ident.node,
-                    typ: typ.clone(),
-                });
-            }
+        match self.env.look_var(ident.node) {
+            Some(&Entry::Var { ref access, ref typ, }) => {
+                if self.closure_level.current != access.0.current {
+                    self.fields.insert(ClosureField {
+                        ident: ident.node,
+                        typ: typ.clone(),
+                    });
+                }
+            },
+            Some(&Entry::RecordField { ref record }) => {
+                match *record {
+                    Type::Record { ref types, .. } => {
+                        for &(name, ref typ) in types {
+                            if name == ident.node {
+                                self.fields.insert(ClosureField {
+                                    ident: ident.node,
+                                    typ: typ.clone(),
+                                });
+                            }
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+            },
+            _ => (),
         }
     }
 }
 
 fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F>, closure_level: Level<F>) -> BTreeSet<ClosureField> {
+    // FIXME: do not fetch the closure itself (in case of recursive closure).
     let mut finder = EnvFinder::new(env, closure_level);
     finder.visit_exp(exp);
     finder.fields
@@ -1599,7 +1213,7 @@ fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F
 
 fn type_is_collectable(typ: &Type) -> bool {
     match *typ {
-        Type::Array { .. } | Type::Class { .. } | Type::Function { .. } | Type::Record { .. } | Type::String => true,
+        Type::Array { .. } | Type::Closure { .. } | Type::Function { .. } | Type::Record { .. } | Type::String => true,
         _ => false,
     }
 }

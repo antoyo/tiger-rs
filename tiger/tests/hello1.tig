@@ -1,5 +1,5 @@
-(
-    print("Hello, World!\n");
-    print("2\n");
-    printi(42)
+print("Hello, World!\n", function() =
+    print("2\n", function() =
+        printi(42, tigerExit)
+    )
 )

@@ -20,12 +20,12 @@
  */
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use ast::Operator;
 use data_layout::{
     ARRAY_DATA_LAYOUT_SIZE,
-    CLASS_DATA_LAYOUT_SIZE,
     RECORD_DATA_LAYOUT_SIZE,
 };
 use frame::{Fragment, Frame, Memory};
@@ -64,16 +64,29 @@ use ir::_Statement::{
     Move,
     Sequence,
 };
-use semant::{FieldType, VTABLE_OFFSET};
 use temp::{Label, Temp, TempMap};
 
 #[allow(type_alias_bounds)]
 pub type Access<F: Frame> = (Level<F>, F::Access);
 
+pub struct IR<F: Frame> {
+    pub data: Vec<Fragment<F>>,
+    pub functions: BTreeMap<String, Fragment<F>>,
+}
+
+impl<F: Frame> IR<F> {
+    fn new() -> Self {
+        Self {
+            data: vec![],
+            functions: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Level<F> {
     pub current: Rc<RefCell<F>>,
-    parent: Option<Box<Level<F>>>,
+    pub parent: Option<Box<Level<F>>>,
 }
 
 impl<F> Clone for Level<F> {
@@ -100,7 +113,7 @@ pub fn outermost<F: Frame>() -> Level<F> {
 
 impl<F: Frame> Level<F> {
     pub fn new(parent: &Level<F>, name: Label, mut formals: Vec<bool>) -> Level<F> {
-        formals.push(true); // for the static link.
+        formals.push(true); // Since all functions are converted to closure, add a parameter for the closure.
         Level {
             current: Rc::new(RefCell::new(F::new(name, formals))),
             parent: Some(Box::new(parent.clone())),
@@ -145,73 +158,13 @@ pub fn binary_oper(op: Operator, left: Exp, right: Exp) -> Exp {
     }
 }
 
-pub fn field_access<F: Frame>(var: Exp, field_index: usize, field_type: FieldType) -> Exp {
-    let offset =
-        match field_type {
-            FieldType::Class => CLASS_DATA_LAYOUT_SIZE,
-            FieldType::Record => RECORD_DATA_LAYOUT_SIZE,
-        };
+pub fn field_access<F: Frame>(var: Exp, field_index: usize) -> Exp {
+    let offset = RECORD_DATA_LAYOUT_SIZE;
     Mem(Box::new(BinOp {
         op: Plus,
         left: Box::new(var),
         right: Box::new(Const(F::WORD_SIZE * (field_index + offset) as i64)),
     }))
-}
-
-fn call<F: Clone + Frame + PartialEq>(function: Exp, mut arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>, collectable_return_type: bool, in_closure: bool) -> Exp
-{
-    if *current_level == *parent_level {
-        if in_closure {
-            panic!("Trying to access static link from inside a closure for a recursive call");
-        }
-
-        // For a recursive call, we simply pass the current static link, which represents the stack
-        // frame of the parent function.
-        let frame = current_level.current.borrow();
-        arguments.push(frame.exp(frame.formals().last().expect("static link").clone(), Exp::Temp(F::fp())));
-    }
-    else if current_level.parent.as_deref() == Some(parent_level) {
-        // When calling a function defined in the current frame, simply pass the current frame
-        // pointer for the static link.
-        arguments.push(Exp::Temp(F::fp()));
-    }
-    else {
-        // TODO: print an error as well.
-        if in_closure {
-            panic!("Trying to access static link from inside a closure");
-        }
-
-        // When calling a function defined in a parent frame, go up throught the static links.
-        let mut function_level = parent_level;
-        let mut var = Exp::Temp(F::fp());
-        loop {
-            if let Some(ref current_level) = current_level.parent {
-                if &**current_level == function_level {
-                    break;
-                }
-            }
-            let frame = function_level.current.borrow();
-            var = frame.exp(frame.formals().last().expect("static link").clone(), var);
-            match function_level.parent {
-                Some(ref parent) => function_level = parent,
-                None => break,
-            }
-        }
-        arguments.push(var);
-    }
-    Call {
-        arguments,
-        collectable_return_type,
-        function_expr: Box::new(function),
-        return_label: Label::new(),
-    }
-}
-
-pub fn function_call<F: Clone + Frame + PartialEq>(label: &Label, arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>, collectable_return_type: bool, in_closure: bool) -> Exp
-{
-    call(Name(label.clone()), arguments, parent_level, current_level, collectable_return_type, in_closure)
 }
 
 pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collectable_return_type: bool) -> Exp {
@@ -221,29 +174,6 @@ pub fn function_pointer_call(function_pointer: Exp, arguments: Vec<Exp>, collect
         function_expr: Box::new(function_pointer),
         return_label: Label::new(),
     }
-}
-
-pub fn method_call<F: Clone + Frame + PartialEq>(index: usize, arguments: Vec<Exp>, parent_level: &Level<F>,
-    current_level: &Level<F>, collectable_return_type: bool, in_closure: bool) -> Exp
-{
-    let vtable = Mem(Box::new(BinOp {
-        op: Plus,
-        left: Box::new(arguments[0].clone()),
-        right: Box::new(Const(F::WORD_SIZE * VTABLE_OFFSET as i64)),
-    }));
-    let function_ptr = Mem(Box::new(BinOp {
-        op: Plus,
-        left: Box::new(vtable),
-        right: Box::new(Const(F::WORD_SIZE * index as i64)),
-    }));
-    call(function_ptr, arguments, parent_level, current_level, collectable_return_type, in_closure)
-}
-
-pub fn goto(label: Label) -> Exp {
-    ExpSequence(
-        Box::new(Jump(Name(label.clone()), vec![label]).into()),
-        Box::new(unit()),
-    )
 }
 
 pub fn if_expression<F: Clone + Frame>(test_expr: Exp, if_expr: Exp, else_expr: Option<Exp>, level: &Level<F>) -> Exp {
@@ -283,13 +213,13 @@ pub fn if_expression<F: Clone + Frame>(test_expr: Exp, if_expr: Exp, else_expr: 
     )
 }
 
-pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_expr: Exp, is_pointer: Exp, init_expr: Exp, level: &Level<F>, in_closure: bool) -> Exp {
+pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_expr: Exp, is_pointer: Exp, init_expr: Exp, level: &Level<F>) -> Exp {
     // FIXME: it does many allocations for a 2D array.
     let temp = Temp::new();
     let result =
         if let Some(var) = var.clone() {
             let level = var.0.clone();
-            simple_var(var, &level, in_closure)
+            simple_var(var, &level)
         }
         else {
             Exp::Temp(temp)
@@ -333,44 +263,6 @@ pub fn init_array<F: Clone + Frame + PartialEq>(var: Option<Access<F>>, size_exp
 
 pub fn num(number: i64) -> Exp {
     Const(number)
-}
-
-pub fn class_create<F: Frame + PartialEq>(var: Access<F>, data_layout: Exp, fields: Vec<Exp>, vtable_name: Label, in_closure: bool) -> Exp {
-    let level = var.0.clone();
-    let result = simple_var(var, &level, in_closure);
-
-    let mut sequence = Move(result.clone(), F::external_call("allocClass", vec![data_layout], true)).into();
-    sequence = Sequence(
-        Box::new(sequence),
-        Box::new(Move(Mem(Box::new(BinOp {
-            op: Plus,
-            left: Box::new(result.clone()),
-            right: Box::new(Const(VTABLE_OFFSET as i64 * F::WORD_SIZE)),
-        })), Exp::Name(vtable_name)).into())
-    ).into();
-    for (index, field) in fields.into_iter().enumerate() {
-        let index = index + CLASS_DATA_LAYOUT_SIZE;
-        let temp = Exp::Temp(Temp::new());
-        sequence = Sequence(
-            Box::new(sequence),
-            Box::new(Sequence(
-                // NOTE: the field is move into a temp first to avoid GC issues.
-                // The idea is that the object field's offset won't be computed and spilled before
-                // the field is computed. If the offset is spilled, it won't be updated by the GC
-                // in case of heap relocation because it's a derived pointer.
-                Box::new(Move(temp.clone(), field).into()),
-                Box::new(Move(Mem(Box::new(BinOp {
-                    op: Plus,
-                    left: Box::new(result.clone()),
-                    right: Box::new(Const(index as i64 * F::WORD_SIZE)),
-                })), temp).into())
-            ).into()),
-        ).into();
-    }
-    ExpSequence(
-        Box::new(sequence),
-        Box::new(result),
-    )
 }
 
 pub fn record_create<F: Frame>(data_layout: Exp, fields: Vec<Exp>) -> Exp {
@@ -442,22 +334,9 @@ pub fn relational_oper<F: Clone + Frame>(op: Operator, left: Exp, right: Exp, le
     )
 }
 
-pub fn simple_var<F: Clone + Frame + PartialEq>(access: Access<F>, level: &Level<F>, in_closure: bool) -> Exp {
-    let mut function_level = level;
-    let var_level = access.0;
+pub fn simple_var<F: Clone + Frame + PartialEq>(access: Access<F>, level: &Level<F>) -> Exp {
     let frame = level.current.borrow();
-    let mut var = Exp::Temp(F::fp());
-    // Add the offset of each parent frames (static link).
-    while function_level.current != var_level.current {
-        if in_closure {
-            panic!("Trying to access static link from inside a closure");
-        }
-
-        var = frame.exp(function_level.current.borrow().formals().last().expect("static link").clone(), var);
-        function_level = function_level.parent.as_ref().unwrap_or_else(|| panic!("function level should have a parent"));
-    }
-    var = frame.exp(access.1, var);
-    var
+    frame.exp(access.1, Exp::Temp(F::fp()))
 }
 
 pub fn string_equality<F: Frame>(oper: Operator, left: Exp, right: Exp) -> Exp {
@@ -573,23 +452,23 @@ fn to_ir_rel_op(op: Operator) -> RelationalOp {
 }
 
 pub struct Gen<F: Frame> {
-    fragments: Vec<Fragment<F>>,
+    ir: IR<F>,
 }
 
 impl<F:Frame> Gen<F> {
     pub fn new() -> Self {
         Self {
-            fragments: vec![],
+            ir: IR::new(),
         }
     }
 
-    pub fn get_result(self) -> Vec<Fragment<F>> {
-        self.fragments
+    pub fn get_result(self) -> IR<F> {
+        self.ir
     }
 
     pub fn proc_entry_exit(&mut self, level: &Level<F>, body: Exp, temp_map: TempMap, escaping_vars: Vec<i64>) {
         let body = Move(Exp::Temp(F::return_value()), body).into();
-        self.fragments.push(Fragment::Function {
+        self.ir.functions.insert(level.current.borrow().name().to_string(), Fragment::Function {
             body,
             escaping_vars,
             frame: level.current.clone(),
@@ -599,14 +478,7 @@ impl<F:Frame> Gen<F> {
 
     pub fn string_literal(&mut self, string: String) -> Exp {
         let label = Label::new();
-        self.fragments.push(Fragment::Str(label.clone(), string));
+        self.ir.data.push(Fragment::Str(label.clone(), string));
         Name(label)
-    }
-
-    pub fn vtable(&mut self, class: Label, methods: Vec<Label>) {
-        self.fragments.push(Fragment::VTable {
-            class,
-            methods,
-        });
     }
 }

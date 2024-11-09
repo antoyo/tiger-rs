@@ -57,16 +57,12 @@ impl EscapeFinder {
 
     fn visit_dec(&mut self, declaration: &DeclarationWithPos, depth: u32) {
         match declaration.node {
-            Declaration::ClassDeclaration { ref declarations, .. } => {
-                for declaration in declarations {
-                    self.visit_dec(declaration, depth + 1);
-                }
-            },
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref params, ref body, .. }, .. } in declarations {
                     for param in params {
+                        // TODO: param dig are considered escaping while they should not.
                         self.env.enter(param.node.name, DepthEscape {
-                            depth,
+                            depth: depth + 1,
                             escape: false,
                         });
                     }
@@ -75,7 +71,7 @@ impl EscapeFinder {
             },
             Declaration::Type(_) => (),
             Declaration::VariableDeclaration { ref init, name, .. } => {
-                self.visit_exp(init, depth + 1); // TODO: do we really need to increment depth here?
+                self.visit_exp(init, depth);
                 self.env.enter(name, DepthEscape {
                     depth,
                     escape: false,
@@ -90,22 +86,17 @@ impl EscapeFinder {
                 self.visit_exp(size, depth);
                 self.visit_exp(init, depth);
             },
-            Expr::Assign { ref expr, ref var } => {
-                self.visit_exp(var, depth);
-                self.visit_exp(expr, depth);
-            },
-            Expr::Break => {
-            },
             Expr::Closure { ref body, ref params, .. } => {
                 for param in params {
                     self.env.enter(param.node.name, DepthEscape {
-                        depth,
+                        depth: depth + 1,
                         escape: false,
                     });
                 }
                 self.visit_exp(body, depth + 1);
             },
-            Expr::Call { ref args, .. } => {
+            Expr::Call { ref args, ref function, .. } => {
+                self.visit_exp(function, depth);
                 for arg in args {
                     self.visit_exp(arg, depth);
                 }
@@ -118,7 +109,7 @@ impl EscapeFinder {
                     }
                 }
             },
-            Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
+            Expr::ClosurePointer { .. } => (),
             Expr::FunctionPointerCall { ref args, .. } => {
                 for arg in args {
                     self.visit_exp(arg, depth);
@@ -138,12 +129,6 @@ impl EscapeFinder {
                 }
                 self.visit_exp(body, depth);
             },
-            Expr::MethodCall { ref args, .. } => {
-                for arg in args {
-                    self.visit_exp(arg, depth);
-                }
-            },
-            Expr::New { .. } => (),
             Expr::Nil => (),
             Expr::Oper { ref left, oper: WithPos { node: Operator::Plus, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Minus, .. }, ref right }
@@ -178,10 +163,6 @@ impl EscapeFinder {
             Expr::Subscript { ref expr, ref this } => {
                 self.visit_exp(this, depth);
                 self.visit_exp(expr, depth);
-            },
-            Expr::While { ref body, ref test } => {
-                self.visit_exp(test, depth);
-                self.visit_exp(body, depth);
             },
         }
     }

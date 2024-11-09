@@ -40,6 +40,7 @@ use std::ffi::CStr;
 use std::io::{Read, Write, stdin, stdout};
 use std::mem;
 use std::os::raw::{c_char, c_void};
+use std::process::exit;
 use std::ptr;
 
 use collector::{Layout, GARBAGE_COLLECTOR};
@@ -74,7 +75,7 @@ extern fn chr(num: i64) -> *const c_char {
 }
 
 #[no_mangle]
-extern fn getchar() -> *const c_char {
+extern fn getchar(continuation: *const c_void) {
     let stdin = stdin();
     let char = stdin.bytes().next().expect("next char").expect("read stdin") as char;
 
@@ -88,15 +89,9 @@ extern fn getchar() -> *const c_char {
         let string_ptr = string_ptr.offset(1);
         *string_ptr = 0;
     }
-    string
-}
-
-#[no_mangle]
-extern fn getcharP(continuation: *const c_void) {
-    let char = getchar();
     unsafe {
-        let function: fn(*const c_char) = mem::transmute(get_function_pointer(continuation));
-        function(char);
+        let function: fn(*const c_char, *const c_void) = mem::transmute(get_function_pointer(continuation));
+        function(string, continuation);
     }
 }
 
@@ -132,13 +127,6 @@ extern fn stringEqual(string1: *const c_char, string2: *const c_char) -> i64 {
 }
 
 #[no_mangle]
-extern fn allocClass(data_layout: *const c_char) -> i64 {
-    GARBAGE_COLLECTOR.with(|collector| {
-        collector.borrow_mut().allocate(Layout::Class(data_layout))
-    })
-}
-
-#[no_mangle]
 extern fn allocRecord(data_layout: *const c_char) -> i64 {
     GARBAGE_COLLECTOR.with(|collector| {
         collector.borrow_mut().allocate(Layout::Record(data_layout))
@@ -153,24 +141,43 @@ extern fn initArray(length: usize, is_pointer: i64) -> i64 {
 }
 
 #[no_mangle]
-extern fn print(string: *const c_char) {
+extern fn print(string: *const c_char, continuation: *const c_void) {
     let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
     if let Ok(string) = cstring.to_str() {
         print!("{}", string);
     }
     let _ = stdout().flush();
+    unsafe {
+        let function: fn(*const c_void) = mem::transmute(get_function_pointer(continuation));
+        function(continuation);
+    }
 }
 
 #[no_mangle]
-extern fn printP(string: *const c_char, continuation: *const c_void) {
-    print(string);
-    let function = get_function_pointer(continuation);
-    function();
+extern fn debug(string: *const c_char) {
+    let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
+    if let Ok(string) = cstring.to_str() {
+        println!("{}", string);
+    }
 }
 
 #[no_mangle]
-extern fn printi(num: i32) {
+extern fn debugInt(num: i32) {
     println!("{}", num);
+}
+
+#[no_mangle]
+extern fn printi(num: i32, continuation: *const c_void) {
+    println!("{}", num);
+    unsafe {
+        let function: fn(*const c_void) = mem::transmute(get_function_pointer(continuation));
+        function(continuation);
+    }
+}
+
+#[no_mangle]
+extern fn tigerExit() {
+    exit(0);
 }
 
 // Get the pointer where the string starts, i.e. after the data layout.

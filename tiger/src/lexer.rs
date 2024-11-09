@@ -174,27 +174,18 @@ impl<R: Read> Lexer<R> {
         let token =
             match ident.as_str() {
                 "array" => Array,
-                "break" => Break,
-                "class" => Class,
                 "do" => Do,
                 "else" => Else,
                 "end" => End,
-                "extends" => Extends,
-                "for" => For,
                 "function" => Function,
                 "if" => If,
                 "in" => In,
                 "let" => Let,
-                "method" => Method,
-                "new" => New,
                 "nil" => Nil,
                 "of" => Of,
-                "pure" => Pure,
                 "then" => Then,
-                "to" => To,
                 "type" => Type,
                 "var" => Var,
-                "while" => While,
                 _ => Ident(ident),
             };
         self.make_token(token, len)

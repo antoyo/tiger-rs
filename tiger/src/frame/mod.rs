@@ -40,10 +40,6 @@ pub enum Fragment<F: Frame> {
         temp_map: TempMap,
     },
     Str(Label, String),
-    VTable {
-        class: Label,
-        methods: Vec<Label>,
-    },
 }
 
 pub trait Memory {

@@ -1,18 +1,42 @@
-let function f() =
-        let var v := 6
+let function intToString(i: int): string =
+        let function loop(acc: string, i: int): string =
+            if i = 0 then
+                acc
+            else
+                let var rest := i / 10
+                    var dig := i - rest * 10
+                    function doDigit(): string =
+                        concat(chr(dig + ord("0")), acc)
+                in
+                    loop(doDigit(), rest)
+                end
         in
-            printi(v);
-            let var v := 7
-            in
-                printi(v)
-            end;
-            printi(v);
-            let var v := 8
-            in
-                printi(v)
-            end;
-            printi(v)
+            if i = 0 then
+                "0"
+            else if i < 0 then
+                concat("-", loop("", -i))
+            else
+                loop("", i)
+        end
+
+    function f(): string =
+        let var v := 6
+            var n1 := concat(intToString(v), "\n")
+            var n2 :=
+                let var v := 7
+                in
+                    concat(concat(n1, intToString(v)), "\n")
+                end
+            var n3 := concat(concat(n2, intToString(v)), "\n")
+            var n4 :=
+                let var v := 8
+                in
+                    concat(concat(n3, intToString(v)), "\n")
+                end
+            var n5 := concat(concat(n4, intToString(v)), "\n")
+        in
+            n5
         end
 in
-    f()
+    print(f(), tigerExit)
 end

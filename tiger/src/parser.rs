@@ -34,15 +34,12 @@ use std::result;
 
 use ast::{
     Declaration,
-    Declaration::ClassDeclaration,
     Declaration::VariableDeclaration,
     DeclarationWithPos,
     Expr,
     ExprWithPos,
     Field,
     FieldWithPos,
-    FuncDeclaration,
-    FuncDeclarationWithPos,
     Operator,
     RecordField,
     RecordFieldWithPos,
@@ -50,7 +47,6 @@ use ast::{
     TypeDec,
     TypeDecWithPos,
     TyWithPos,
-    dummy_var_expr,
 };
 use error::Error;
 use error::Error::UnexpectedToken;
@@ -111,6 +107,7 @@ macro_rules! fields {
 pub type Result<T> = result::Result<T, Error>;
 
 pub struct Parser<'a, R: Read> {
+    closure_index: usize,
     lexer: Lexer<R>,
     lookahead: Option<Result<Token>>,
     symbols: &'a mut Symbols<()>,
@@ -119,6 +116,7 @@ pub struct Parser<'a, R: Read> {
 impl<'a, R: Read> Parser<'a, R> {
     pub fn new(lexer: Lexer<R>, symbols: &'a mut Symbols<()>) -> Self {
         Parser {
+            closure_index: 0,
             lexer,
             lookahead: None,
             symbols,
@@ -166,11 +164,6 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(WithPos::new(Ty::Array {
             ident: WithPos::new(ident, type_pos),
         }, pos))
-    }
-
-    fn break_(&mut self) -> Result<ExprWithPos> {
-        let pos = eat!(self, Break);
-        Ok(WithPos::new(Expr::Break, pos))
     }
 
     fn call_args(&mut self) -> Result<(Vec<ExprWithPos>, Pos)> {
@@ -221,45 +214,13 @@ impl<'a, R: Read> Parser<'a, R> {
                 OpenCurly => self.rec_create(WithPos::new(symbol, pos), pos),
                 _ => {
                     let var = WithPos::new(Expr::Variable(WithPos::new(symbol, pos)), pos);
-                    self.lvalue_or_assign(var)
+                    self.lvalue_or_calls(var)
                 }
             }
         }
     }
 
-    fn class_dec(&mut self) -> Result<DeclarationWithPos> {
-        let pos = eat!(self, Class);
-        let name;
-        let ident_pos = eat!(self, Ident, name);
-        let name = WithPos::new(self.symbols.symbol(&name), ident_pos);
-        eat!(self, Extends);
-        let parent_class;
-        let ident_pos = eat!(self, Ident, parent_class);
-        let parent_class = WithPos::new(self.symbols.symbol(&parent_class), ident_pos);
-        eat!(self, OpenCurly);
-
-        let mut declarations = vec![];
-        while let Method | Var = self.peek()?.token {
-            declarations.push(self.dec()?);
-        }
-
-        let end_pos = eat!(self, CloseCurly);
-        Ok(WithPos::new(ClassDeclaration {
-            declarations,
-            name,
-            parent_class,
-        }, pos.grow(end_pos)))
-    }
-
     fn closure(&mut self) -> Result<ExprWithPos> {
-        let pure =
-            if self.peek()?.token == Pure {
-                eat!(self, Pure);
-                true
-            }
-            else {
-                false
-            };
         let pos = eat!(self, Function);
         eat!(self, OpenParen);
         let params = fields!(self, CloseParen);
@@ -268,19 +229,18 @@ impl<'a, R: Read> Parser<'a, R> {
         eat!(self, Equal);
         let body = Box::new(self.expr()?);
         let pos = pos.grow(body.pos);
+        self.closure_index += 1;
         Ok(WithPos::new(Expr::Closure {
             body,
+            name: WithPos::new(self.symbols.symbol(&format!("__closure_{}", self.closure_index)), pos),
             params,
-            pure,
             result,
         }, pos))
     }
 
     fn dec(&mut self) -> Result<DeclarationWithPos> {
         match self.peek()?.token {
-            Class => self.class_dec(),
-            Pure | Function => self.fun_decs(Function),
-            Method => self.fun_decs(Method),
+            Function => self.fun_dec(Function),
             Type => self.ty_decs(),
             Var => self.var_dec(),
             _ => Err(self.unexpected_token("function, type or var")?),
@@ -306,29 +266,17 @@ impl<'a, R: Read> Parser<'a, R> {
         }, pos))
     }
 
-    fn field_exp_or_method_call(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
+    fn field_exp(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
         eat!(self, Dot);
         let name;
         let pos = eat!(self, Ident, name);
         let name = WithPos::new(self.symbols.symbol(&name), pos);
-        if self.peek()?.token == OpenParen {
-            let (args, end_pos) = self.call_args()?;
-            let call_pos = var.pos.grow(end_pos);
-            let method_call = WithPos::new(Expr::MethodCall {
-                args,
-                method: name,
-                this: Box::new(var),
-            }, call_pos);
-            self.lvalue(method_call)
-        }
-        else {
-            let var_pos = var.pos.grow(pos);
-            let var = WithPos::new(Expr::Field {
-                ident: name,
-                this: Box::new(var),
-            }, var_pos);
-            self.lvalue(var)
-        }
+        let var_pos = var.pos.grow(pos);
+        let var = WithPos::new(Expr::Field {
+            ident: name,
+            this: Box::new(var),
+        }, var_pos);
+        self.lvalue(var)
     }
 
     fn fields(&mut self) -> Result<Vec<FieldWithPos>> {
@@ -353,99 +301,7 @@ impl<'a, R: Read> Parser<'a, R> {
         }, pos))
     }
 
-    fn for_loop(&mut self) -> Result<ExprWithPos> {
-        let pos = eat!(self, For);
-        let var_name;
-        let var_pos = eat!(self, Ident, var_name);
-        let var = self.symbols.symbol(&var_name);
-        let iter_variable = WithPos::new(Expr::Variable(WithPos::new(var, var_pos)), var_pos);
-        eat!(self, ColonEqual);
-        let start = self.expr()?;
-        eat!(self, To);
-        let end = self.expr()?;
-        eat!(self, Do);
-        let body = self.expr()?;
-        // Convert for loop into while loop.
-        let start_symbol = self.symbols.symbol(&var_name);
-        let end_symbol = self.symbols.symbol(&format!("__{}_limit", var_name));
-        let declarations = vec![
-            WithPos::dummy(VariableDeclaration {
-                escape: false,
-                init: start,
-                name: start_symbol,
-                typ: None,
-            }),
-            WithPos::dummy(VariableDeclaration {
-                escape: false,
-                init: end,
-                name: end_symbol,
-                typ: None,
-            }),
-        ];
-        let body =
-            Expr::If {
-                else_: None,
-                test: Box::new(
-                    WithPos::dummy(Expr::Oper {
-                        left: Box::new(iter_variable.clone()),
-                        oper: WithPos::dummy(Operator::Le),
-                        right: Box::new(dummy_var_expr(end_symbol)),
-                    })
-                ),
-                then:
-                    Box::new(WithPos::new(Expr::While {
-                        body: Box::new(WithPos::dummy(Expr::Sequence(vec![
-                            body,
-                            WithPos::dummy(Expr::If {
-                                else_: Some(Box::new(WithPos::dummy(Expr::Break))),
-                                test:
-                                    Box::new(WithPos::dummy(Expr::Oper {
-                                        left: Box::new(iter_variable.clone()),
-                                        oper: WithPos::dummy(Operator::Lt),
-                                        right: Box::new(dummy_var_expr(end_symbol)),
-                                    })),
-                                then:
-                                    Box::new(WithPos::dummy(Expr::Assign {
-                                        expr: Box::new(WithPos::dummy(Expr::Oper {
-                                            left: Box::new(iter_variable.clone()),
-                                            oper: WithPos::dummy(Operator::Plus),
-                                            right: Box::new(WithPos::dummy(Expr::Int { value: 1 })),
-                                        })),
-                                        var: Box::new(iter_variable),
-                                    })),
-                            }),
-                        ]))),
-                        test: Box::new(WithPos::dummy(Expr::Int {
-                            value: 1,
-                        })),
-                    }, pos)),
-            };
-
-        Ok(WithPos::new(Expr::Let {
-            body: Box::new(WithPos::dummy(body)),
-            declarations,
-        }, pos))
-    }
-
-    fn fun_decs(&mut self, token: Tok) -> Result<DeclarationWithPos> {
-        let func = self.fun_dec(token.clone())?;
-        let pos = func.pos;
-        let mut functions = vec![func];
-        while self.peek()?.token == token {
-            functions.push(self.fun_dec(token.clone())?);
-        }
-        Ok(WithPos::new(Declaration::Function(functions), pos))
-    }
-
-    fn fun_dec(&mut self, token: Tok) -> Result<FuncDeclarationWithPos> {
-        let pure =
-            if self.peek()?.token == Pure {
-                eat!(self, Pure);
-                true
-            }
-            else {
-                false
-            };
+    fn fun_dec(&mut self, token: Tok) -> Result<DeclarationWithPos> {
         let tok = self.token()?;
         assert!(tok.token == token);
         let pos = tok.pos;
@@ -458,12 +314,17 @@ impl<'a, R: Read> Parser<'a, R> {
         let result = self.optional_type()?;
         eat!(self, Equal);
         let body = self.expr()?;
-        Ok(WithPos::new(FuncDeclaration {
-            body,
-            name,
-            params,
-            pure,
-            result,
+        let name_symbol = name.node;
+        Ok(WithPos::new(VariableDeclaration {
+            escape: false,
+            init: WithPos::new(Expr::Closure {
+                body: Box::new(body),
+                name,
+                params,
+                result,
+            }, pos),
+            name: name_symbol,
+            typ: None,
         }, pos))
     }
 
@@ -500,10 +361,10 @@ impl<'a, R: Read> Parser<'a, R> {
     fn let_expr(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Let);
         let mut declarations = vec![self.dec()?];
-        while let Class | Function | Pure | Type | Var = self.peek()?.token {
+        while let Function | Type | Var = self.peek()?.token {
             declarations.push(self.dec()?);
         }
-        eat!(self, In, "class, function, in, type, var".to_string());
+        eat!(self, In, "function, in, type, var".to_string());
         let expr = self.expr()?;
         let mut exprs = vec![expr];
         while let Semicolon = self.peek()?.token {
@@ -551,12 +412,12 @@ impl<'a, R: Read> Parser<'a, R> {
     fn lvalue(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
         match self.peek()?.token {
             OpenSquare => self.subscript(var),
-            Dot => self.field_exp_or_method_call(var),
+            Dot => self.field_exp(var),
             _ => Ok(var),
         }
     }
 
-    fn lvalue_or_assign(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
+    fn lvalue_or_calls(&mut self, var: ExprWithPos) -> Result<ExprWithPos> {
         let var = self.lvalue(var)?;
         let value =
             if let Of = self.peek()?.token {
@@ -576,18 +437,7 @@ impl<'a, R: Read> Parser<'a, R> {
             else {
                 var
             };
-        if let ColonEqual = self.peek()?.token {
-            eat!(self, ColonEqual);
-            let expr = Box::new(self.expr()?);
-            let pos = value.pos.grow(expr.pos);
-            Ok(WithPos::new(Expr::Assign {
-                expr,
-                var: Box::new(value),
-            }, pos))
-        }
-        else {
-            self.more_calls(value)
-        }
+        self.more_calls(value)
     }
 
     fn multiplicative_expr(&mut self) -> Result<ExprWithPos> {
@@ -610,16 +460,6 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(expr)
     }
 
-    fn new_object(&mut self) -> Result<ExprWithPos> {
-        let pos = eat!(self, New);
-        let class_name;
-        let end_pos = eat!(self, Ident, class_name);
-        let class_name = WithPos::new(self.symbols.symbol(&class_name), end_pos);
-        Ok(WithPos::new(Expr::New {
-            class_name,
-        }, pos.grow(end_pos)))
-    }
-
     fn nil(&mut self) -> Result<ExprWithPos> {
         let pos = eat!(self, Nil);
         Ok(WithPos::new(Expr::Nil, pos))
@@ -639,19 +479,15 @@ impl<'a, R: Read> Parser<'a, R> {
 
     fn primary_expr(&mut self) -> Result<ExprWithPos> {
         match self.peek()?.token {
-            Break => self.break_(),
-            For => self.for_loop(),
-            Function | Pure => self.closure(),
+            Function => self.closure(),
             If => self.if_then_else(),
             Ident(_) => self.call_expr_or_other(),
             Int(_) => self.int_lit(),
             Let => self.let_expr(),
-            New => self.new_object(),
             Nil => self.nil(),
             OpenParen => self.seq_exp(),
             Str(_) => self.string_lit(),
-            While => self.while_loop(),
-            _ => Err(self.unexpected_token("break, for, function, if, identifier, integer literal, let, nil, (, string literal, while")?),
+            _ => Err(self.unexpected_token("break, function, if, identifier, integer literal, let, nil, (, string literal, while")?),
         }
     }
 
@@ -855,17 +691,6 @@ impl<'a, R: Read> Parser<'a, R> {
             init,
             name,
             typ,
-        }, pos))
-    }
-
-    fn while_loop(&mut self) -> Result<ExprWithPos> {
-        let pos = eat!(self, While);
-        let test = Box::new(self.expr()?);
-        eat!(self, Do);
-        let body = Box::new(self.expr()?);
-        Ok(WithPos::new(Expr::While {
-            body,
-            test,
         }, pos))
     }
 

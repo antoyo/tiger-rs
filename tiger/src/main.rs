@@ -20,6 +20,8 @@
  */
 
 /*
+ * TODO: do not stack allocate escaping variables anymore (since they're on the heap now)?
+ *
  * FIXME: array elements initialized to the same record (instead of allocating a record per
  * element).
  *
@@ -51,6 +53,8 @@ mod graph;
 mod ir;
 mod lexer;
 mod liveness;
+mod log;
+mod opt;
 mod parser;
 mod position;
 mod reg_alloc;
@@ -79,6 +83,7 @@ use escape::find_escapes;
 use frame::{Fragment, Frame};
 use frame::x86_64::X86_64;
 use lexer::Lexer;
+use opt::optimize;
 use parser::Parser;
 use reg_alloc::alloc;
 use rewriter::Rewriter;
@@ -115,7 +120,9 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
         let mut env = Env::<X86_64>::new(&strings, escape_env);
         {
             let semantic_analyzer = SemanticAnalyzer::new(&mut env, symbols, Rc::clone(&strings));
-            let fragments = semantic_analyzer.analyze(ast)?;
+            let mut ir = semantic_analyzer.analyze(ast)?;
+
+            optimize(&mut ir);
 
             let mut asm_output_path = PathBuf::from(&filename);
             asm_output_path.set_extension("s");
@@ -133,9 +140,13 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
             writeln!(file, "section .data")?;
             writeln!(file, "    align 2")?;
 
-            for fragment in &fragments {
+            /*for fragment in &fragments {
                 match *fragment {
                     Fragment::Function { .. } => (),
+                    Fragment::Str(ref label, ref string) => {*/
+            for fragment in &ir.data {
+                match *fragment {
+                    Fragment::Function { .. } => unreachable!(),
                     Fragment::Str(ref label, ref string) => {
                         // NOTE: creating a useless data layout here so that heap-allocated strings
                         // are accessed the same way as static strings.
@@ -146,16 +157,6 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         }
                         writeln!(file, "db {}, 0", to_nasm(string))?;
                     },
-                    Fragment::VTable { ref class, ref methods } => {
-                        writeln!(file, "{}:", class)?;
-                        if !methods.is_empty() {
-                            let labels = methods.iter()
-                                .map(|label| label.to_string())
-                                .collect::<Vec<_>>()
-                                .join("\n    dq ");
-                            writeln!(file, "    dq {}", labels)?;
-                        }
-                    },
                 }
             }
 
@@ -163,7 +164,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
 
             writeln!(file, "\nsection .text")?;
 
-            for fragment in fragments {
+            for (_, fragment) in ir.functions {
                 match fragment {
                     Fragment::Function { body, escaping_vars, frame, temp_map } => {
                         let mut frame = frame.borrow_mut();
@@ -193,8 +194,7 @@ fn drive(strings: Rc<Strings>, symbols: &mut Symbols<()>) -> Result<(), Error> {
                         }
                         writeln!(file, "    {}", subroutine.epilog)?;
                     },
-                    Fragment::Str(_, _) => (),
-                    Fragment::VTable { .. } => (),
+                    Fragment::Str(_, _)  => unreachable!(),
                 }
             }
 

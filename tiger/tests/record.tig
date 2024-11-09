@@ -11,13 +11,8 @@ let type Point = {
         y = 0
     }
 in (
-    printi(point.x);
-    printi(point.y);
-    point.y := 100;
-    printi(point.x);
-    printi(point.y);
-    point.x := 200;
-    printi(point.x);
-    printi(point.y)
+    printi(point.x, function() =
+        printi(point.y, tigerExit)
+    )
 )
 end

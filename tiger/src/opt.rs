@@ -19,13 +19,34 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-// Type, Size, Is pointer.
-pub const ARRAY_DATA_LAYOUT_SIZE: usize = 3;
+use frame::Frame;
+use gen::IR;
 
-// Type, String of is pointer.
-pub const RECORD_DATA_LAYOUT_SIZE: usize = 2;
+pub fn optimize<F: Frame>(ir: &mut IR<F>) {
+    let mut optimizer = Opt::new(ir);
+    optimizer.optimize();
+}
 
-// Type, Size.
-pub const STRING_DATA_LAYOUT_SIZE: usize = 2;
+struct Opt<'a, F: Frame> {
+    ir: &'a mut IR<F>,
+}
 
-pub const STRING_TYPE: usize = 2;
+impl<'a, F: Frame> Opt<'a, F> {
+    fn new(ir: &'a mut IR<F>) -> Self {
+        Self {
+            ir,
+        }
+    }
+
+    fn optimize(&mut self) {
+        let names: Vec<_> = self.ir.functions.keys()
+            .cloned()
+            .collect(); // TODO: remove collect and clone?
+        for func_name in names {
+            self.inline(&func_name);
+        }
+    }
+
+    fn inline(&mut self, _func_name: &str) {
+    }
+}

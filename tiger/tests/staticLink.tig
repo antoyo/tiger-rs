@@ -1,0 +1,21 @@
+let var n := 10
+    var output := concat("Hello, ", "world\n")
+    function test3() = (
+        print(output);
+        printi(n)
+    )
+    function test() =
+        let var s := 12
+            function test2() = (
+                print(output);
+                test3();
+                printi(n);
+                printi(s)
+            )
+        in
+            printi(n);
+            test2()
+        end
+in
+    test()
+end

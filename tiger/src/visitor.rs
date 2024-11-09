@@ -28,7 +28,7 @@ use ast::{
     Operator,
 };
 use position::WithPos;
-use symbol::SymbolWithPos;
+use symbol::{Symbol, SymbolWithPos};
 
 pub trait Visitor {
     fn visit_binary_op(&mut self, left: &ExprWithPos, right: &ExprWithPos) {
@@ -38,21 +38,24 @@ pub trait Visitor {
 
     fn visit_dec(&mut self, declaration: &DeclarationWithPos) {
         match declaration.node {
-            Declaration::ClassDeclaration { ref declarations, .. } => {
-                for declaration in declarations {
-                    self.visit_dec(declaration);
-                }
-            },
             Declaration::Function(ref declarations) => {
                 for &WithPos { node: FuncDeclaration { ref body, .. }, .. } in declarations {
-                    self.visit_exp(body);
+                    self.visit_func_dec(body);
                 }
             },
             Declaration::Type(_) => (),
-            Declaration::VariableDeclaration { ref init, .. } => {
-                self.visit_exp(init);
+            Declaration::VariableDeclaration { ref init, name, .. } => {
+                self.visit_var_dec(name, init);
             },
         }
+    }
+
+    fn visit_func_dec(&mut self, body: &ExprWithPos) {
+        self.visit_exp(body);
+    }
+
+    fn visit_var_dec(&mut self, _name: Symbol, init: &ExprWithPos) {
+        self.visit_exp(init);
     }
 
     fn visit_call(&mut self, function: &ExprWithPos, args: &[ExprWithPos]) {
@@ -62,29 +65,25 @@ pub trait Visitor {
         }
     }
 
+    fn visit_closure(&mut self, body: &ExprWithPos) {
+        self.visit_exp(body);
+    }
+
     fn visit_exp(&mut self, expr: &ExprWithPos) {
         match expr.node {
             Expr::Array { ref init, ref size, .. } => {
                 self.visit_exp(size);
                 self.visit_exp(init);
             },
-            Expr::Assign { ref expr, ref var } => {
-                self.visit_exp(var);
-                self.visit_exp(expr);
-            },
-            Expr::Break => {
-            },
             Expr::Call { ref args, ref function } => {
                 self.visit_call(function, args);
             },
-            Expr::Closure { ref body, .. } => {
-                self.visit_exp(body);
-            },
+            Expr::Closure { ref body, .. } => self.visit_closure(body),
             Expr::ClosureParamField { ref this, .. } =>
                 self.visit_exp(this),
             Expr::Field { ref this, .. } =>
                 self.visit_exp(this),
-            Expr::ClosurePointer { .. } | Expr::FunctionPointer { .. } => (),
+            Expr::ClosurePointer { .. } => (),
             Expr::FunctionPointerCall { ref args, ref function, .. } => {
                 self.visit_exp(function);
                 for arg in args {
@@ -105,13 +104,6 @@ pub trait Visitor {
                 }
                 self.visit_exp(body);
             },
-            Expr::MethodCall { ref args, ref this, .. } => {
-                self.visit_exp(this);
-                for arg in args {
-                    self.visit_exp(arg);
-                }
-            },
-            Expr::New { .. } => (),
             Expr::Nil => (),
             Expr::Oper { ref left, oper: WithPos { node: Operator::Plus, .. }, ref right }
             | Expr::Oper { ref left, oper: WithPos { node: Operator::Minus, .. }, ref right }
@@ -148,10 +140,6 @@ pub trait Visitor {
                 self.visit_exp(expr);
             },
             Expr::Variable(ref ident) => self.visit_var(ident),
-            Expr::While { ref body, ref test } => {
-                self.visit_exp(test);
-                self.visit_exp(body);
-            },
         }
     }
 

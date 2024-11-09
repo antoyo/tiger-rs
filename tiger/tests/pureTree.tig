@@ -7,7 +7,7 @@ let type key = int
         right: tree
     }
 
-    pure function look(t: tree, k: key): binding =
+    function look(t: tree, k: key): binding =
         if t = nil then
             "<not-found>"
         else if k < t.key then
@@ -17,7 +17,7 @@ let type key = int
         else
             t.binding
 
-    pure function enter(t: tree, k: key, b: binding): tree =
+    function enter(t: tree, k: key, b: binding): tree =
         if t = nil then
             tree {
                 key = k,
@@ -64,13 +64,18 @@ let type key = int
         }
     }
 in
-    print(look(tree, 15));
-    print("\n");
-    let var newTree := enter(tree, 20, "20")
-    in
-        print(look(tree, 20));
-        print("\n");
-        print(look(newTree, 20));
-        print("\n")
-    end
+    print(look(tree, 15), function() =
+        print("\n", function() =
+            let var newTree := enter(tree, 20, "20")
+            in
+                print(look(tree, 20), function() =
+                    print("\n", function() =
+                        print(look(newTree, 20), function() =
+                            print("\n", tigerExit)
+                        )
+                    )
+                )
+            end
+        )
+    )
 end

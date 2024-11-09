@@ -29,27 +29,12 @@ use self::Error::*;
 use symbol::Symbols;
 use terminal::Terminal;
 use token::Tok;
-use types::{FunctionType, Type};
+use types::Type;
 
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Clone, Debug)]
 pub enum Error {
-    Assign {
-        pos: Pos,
-    },
-    BreakOutsideLoop {
-        pos: Pos,
-    },
-    CannotAccessOutsideVars {
-        pos: Pos,
-    },
-    CannotAssignInPureFun {
-        pos: Pos,
-    },
-    CannotCallImpureFun {
-        pos: Pos,
-    },
     CannotIndex {
         pos: Pos,
         typ: Type,
@@ -67,11 +52,6 @@ pub enum Error {
         pos: Pos,
         struct_name: String,
     },
-    FunctionType {
-        expected: FunctionType,
-        pos: Pos,
-        unexpected: FunctionType,
-    },
     InvalidEscape {
         escape: String,
         pos: Pos,
@@ -88,14 +68,7 @@ pub enum Error {
     },
     Msg(String),
     Multi(Vec<Error>),
-    NoLoopInPureFun {
-        pos: Pos,
-    },
-    NotAClass {
-        pos: Pos,
-        typ: Type,
-    },
-    NotARecordOrClass {
+    NotARecord {
         pos: Pos,
         typ: Type,
     },
@@ -150,30 +123,6 @@ impl Error {
         }
         eprint!("{}{}error: {}", terminal.bold(), terminal.red(), terminal.reset_color());
         match *self {
-            Assign { pos } => {
-                eprintln!("Can only assign to variable, field or array element{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            BreakOutsideLoop { pos } => {
-                eprintln!("Break statement used outside of loop{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-            },
-            CannotCallImpureFun { pos } => {
-                eprintln!("Cannot call impure functions in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            CannotAccessOutsideVars { pos } => {
-                eprintln!("Cannot convert into a closure a function that accesses variables declared outside of it{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            CannotAssignInPureFun { pos } => {
-                eprintln!("Cannot assign in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
             CannotIndex { pos, ref typ } => {
                 eprintln!("Cannot index value of type `{}`{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal)
@@ -192,11 +141,6 @@ impl Error {
                 eprintln!("Extra field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
                 pos.show(symbols, terminal);
             },
-            Error::FunctionType { ref expected, pos, ref unexpected } => {
-                eprintln!("Overridden method should have the same type as the inherited method:\nunexpected {}\n expecting {}{}", unexpected.show(symbols), expected.show(symbols), terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
             InvalidEscape { ref escape, pos } => {
                 eprintln!("Invalid escape \\{}{}", escape, terminal.end_bold());
                 pos.show(symbols, terminal);
@@ -213,18 +157,8 @@ impl Error {
             },
             Msg(ref string) => eprintln!("{}", string),
             Multi(_) => unreachable!(),
-            NoLoopInPureFun { pos } => {
-                eprintln!("Cannot use loops in pure functions{}", terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            NotAClass { pos, ref typ } => {
-                eprintln!("Type `{}` is not a class type{}", typ.show(symbols), terminal.end_bold());
-                pos.show(symbols, terminal);
-                highlight_line(pos, symbols, terminal)?;
-            },
-            NotARecordOrClass { pos, ref typ } => {
-                eprintln!("Type `{}` is not a struct or a class type{}", typ.show(symbols), terminal.end_bold());
+            NotARecord { pos, ref typ } => {
+                eprintln!("Type `{}` is not a struct{}", typ.show(symbols), terminal.end_bold());
                 pos.show(symbols, terminal);
                 highlight_line(pos, symbols, terminal)?;
             },
@@ -255,6 +189,7 @@ impl Error {
             UnexpectedField { ref ident, pos, ref struct_name } => {
                 eprintln!("Unexpected field `{}` in struct of type `{}`{}", ident, struct_name, terminal.end_bold());
                 pos.show(symbols, terminal);
+                highlight_line(pos, symbols, terminal)?;
             },
             UnexpectedToken { ref expected, pos, ref unexpected } => {
                 eprintln!("Unexpected token {}, expecting {}{}", unexpected, expected, terminal.end_bold());

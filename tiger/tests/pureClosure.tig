@@ -11,7 +11,7 @@ let type intConsumer = int -> answer
                 else
                     done(accum)
             in
-                getchar(eatChar)
+                getchar(function(char: string) = eatChar(char))
             end
         in
             nextDigit(0)
@@ -26,7 +26,7 @@ let type intConsumer = int -> answer
                 function doDigit() =
                     print(chr(dig + ord("0")), c)
             in
-                putInt(rest, doDigit)
+                putInt(rest, function() = doDigit())
             end
 
     function factorial(i: int) : int =

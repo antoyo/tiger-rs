@@ -1,15 +1,22 @@
 (
-    printi(ord("a"));
-    print(chr(97));
-    print("\n");
-    print(chr(ord("a")));
-    print("\n");
-    if "a" = "a" then
-        print("true\n");
-    let var char := getchar()
-    in (
-        print(char);
-        print("\n")
+    printi(ord("a"), function() =
+        print(chr(97), function() =
+            print("\n", function() =
+                print(chr(ord("a")), function() =
+                    print("\n", function() =
+                        if "a" = "a" then
+                            print("true\n", function() =
+                                getchar(function(char: string) =
+                                    print(char, function() =
+                                        print("\n", tigerExit)
+                                    )
+                                )
+                            )
+                        else
+                            tigerExit()
+                    )
+                )
+            )
+        )
     )
-    end
 )

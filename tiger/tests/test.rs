@@ -19,6 +19,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+// TODO: run the error tests.
+
 use std::fs::{self, remove_file};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -27,12 +29,9 @@ use std::process::{Command, Stdio};
 #[test]
 fn test_execution() {
     let files = [
-        "array",
-        "array_assignment",
-        "class",
+        // TODO: remove the test files that are not needed anymore (array, …).
         "comments",
         "conditions",
-        "cycle",
         "escapes",
         "functional",
         "functions",
@@ -45,12 +44,13 @@ fn test_execution() {
         "helloPure",
         "integers",
         "lib",
-        "loops",
         "merge",
         "nested",
-        "prettyprint",
+        //"prettyprint",
+        "pure",
+        "pureClosure",
         "pureTree",
-        "queens",
+        //"queens",
         "record",
         "spill",
         "strings",

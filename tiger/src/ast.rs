@@ -21,16 +21,10 @@
 
 use position::WithPos;
 use symbol::{Symbol, SymbolWithPos};
-use temp::Label;
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
-    ClassDeclaration {
-        declarations: Vec<DeclarationWithPos>,
-        name: SymbolWithPos,
-        parent_class: SymbolWithPos,
-    },
     Function(Vec<FuncDeclarationWithPos>),
     Type(Vec<TypeDecWithPos>),
     VariableDeclaration {
@@ -50,19 +44,14 @@ pub enum Expr {
         size: Box<ExprWithPos>,
         typ: SymbolWithPos,
     },
-    Assign {
-        expr: Box<ExprWithPos>,
-        var: Box<ExprWithPos>,
-    },
-    Break,
     Call {
         args: Vec<ExprWithPos>,
         function: Box<ExprWithPos>,
     },
     Closure {
         body: Box<ExprWithPos>,
+        name: SymbolWithPos,
         params: Vec<FieldWithPos>,
-        pure: bool,
         result: Option<SymbolWithPos>,
     },
     ClosureParamField {
@@ -75,9 +64,6 @@ pub enum Expr {
     Field {
         ident: SymbolWithPos,
         this: Box<ExprWithPos>,
-    },
-    FunctionPointer {
-        label: Label,
     },
     FunctionPointerCall {
         args: Vec<ExprWithPos>,
@@ -95,14 +81,6 @@ pub enum Expr {
     Let {
         body: Box<ExprWithPos>,
         declarations: Vec<DeclarationWithPos>,
-    },
-    MethodCall {
-        args: Vec<ExprWithPos>,
-        method: SymbolWithPos,
-        this: Box<ExprWithPos>,
-    },
-    New {
-        class_name: SymbolWithPos,
     },
     Nil,
     Oper {
@@ -123,10 +101,6 @@ pub enum Expr {
         this: Box<ExprWithPos>,
     },
     Variable(SymbolWithPos),
-    While {
-        body: Box<ExprWithPos>,
-        test: Box<ExprWithPos>,
-    },
 }
 
 pub type ExprWithPos = WithPos<Expr>;
@@ -145,7 +119,6 @@ pub struct FuncDeclaration {
     pub body: ExprWithPos,
     pub name: SymbolWithPos,
     pub params: Vec<FieldWithPos>,
-    pub pure: bool,
     pub result: Option<SymbolWithPos>,
 }
 
@@ -204,7 +177,3 @@ pub struct TypeDec {
 pub type TypeDecWithPos = WithPos<TypeDec>;
 
 pub type TyWithPos = WithPos<Ty>;
-
-pub fn dummy_var_expr(symbol: Symbol) -> ExprWithPos {
-    WithPos::dummy(Expr::Variable(WithPos::dummy(symbol)))
-}
