@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2024 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -22,6 +22,7 @@
 use ast::ExprWithPos;
 use ir::Exp;
 use self::Type::*;
+use self::TypeConstructor::*;
 use symbol::{Symbol, Symbols, SymbolWithPos};
 use temp::Label;
 
@@ -57,8 +58,84 @@ pub struct ClassMethod {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct TyVar(pub Symbol);
+
+impl TyVar {
+    pub fn from_symbol(symbol: Symbol) -> Self {
+        Self(symbol)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
-    Array(Box<Type>, Unique),
+    /// Apply a type constructor (such as list) to type arguments (such as <int>).
+    App(TypeConstructor, Vec<Type>),
+    Nil,
+    //Poly(Vec<TyVar>, Box<Type>),
+    Var(TyVar),
+    Error,
+}
+
+impl Type {
+    pub fn is_pointer(&self) -> bool {
+        match *self {
+            App(TypeConstructor::Unique(ref inner_type, _), _) => {
+                match **inner_type {
+                    Array | Class { .. } | Record { .. }  => true,
+                    _ => false,
+                }
+            },
+            App(String, _)  => true,
+            //Poly(_, ref typ) => typ.is_pointer(),
+            Var(_) => todo!(),
+            _ => false,
+        }
+    }
+
+    pub fn new_answer() -> Self {
+        Self::App(TypeConstructor::Answer, vec![])
+    }
+
+    pub fn new_int() -> Self {
+        Self::App(TypeConstructor::Int, vec![])
+    }
+
+    pub fn new_string() -> Self {
+        Self::App(TypeConstructor::String, vec![])
+    }
+
+    pub fn new_unit() -> Self {
+        Self::App(TypeConstructor::Unit, vec![])
+    }
+
+    pub fn show(&self, symbols: &Symbols<()>) -> std::string::String {
+        match *self {
+            App(TypeConstructor::Unique(ref typ, _), ref vec) => {
+                App(*typ.clone(), vec.clone()).show(symbols)
+            },
+            App(ref type_constructor, ref vec) => {
+                let mut types = std::string::String::new();
+                for typ in vec {
+                    types.push_str(&typ.show(symbols));
+                }
+                if !types.is_empty() {
+                    types = format!("<{}>", types);
+                }
+                format!("{}{}", type_constructor.show(symbols), types)
+            },
+            Nil => "nil".to_string(),
+            //Poly(_, _) => todo!(),
+            Var(ref ty_var) => symbols.name(ty_var.0),
+            Error => "type error".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TypeConstructor {
+    Array,
+    /// Used for function types.
+    Arrow,
     Answer,
     Class {
         data_layout: std::string::String,
@@ -66,81 +143,36 @@ pub enum Type {
         methods: Vec<ClassMethod>,
         name: Symbol,
         parent_class: Option<SymbolWithPos>,
-        unique: Unique,
         vtable_name: Label,
     },
-    Function {
-        parameters: Vec<Type>,
-        return_type: Box<Type>,
-    },
     Int,
-    Name(SymbolWithPos, Option<Box<Type>>),
-    Nil,
     String,
     Record {
         data_layout: Exp,
         name: Symbol,
         types: Vec<(Symbol, Type)>,
-        unique: Unique,
     },
+    // FIXME: having to wrap Array, Record and Class in Unique is very error-prone.
+    Unique(Box<TypeConstructor>, Unique),
     Unit,
-    Error,
 }
 
-impl Type {
-    pub fn is_pointer(&self) -> bool {
-        match *self {
-            Array { .. } | Class { .. } | Record { .. } | String  => true,
-            Name(_, ref typ) => {
-                if let Some(typ) = typ.as_ref() {
-                    typ.is_pointer()
-                }
-                else {
-                    false
-                }
-            },
-            _ => false,
-        }
+impl TypeConstructor {
+    pub fn new_unique(type_constructor: TypeConstructor) -> Self {
+        Self::Unique(Box::new(type_constructor), Unique::new())
     }
 
     pub fn show(&self, symbols: &Symbols<()>) -> std::string::String {
         match *self {
             Answer => "answer".to_string(),
-            Array(ref typ, _) => {
-                format!("[{}]", typ.show(symbols))
-            },
+            Arrow => "->".to_string(),
+            Array => "[]".to_string(),
             Class { name, .. } => format!("class {}", symbols.name(name)),
-            Function { ref parameters, ref return_type } => {
-                let show_parens = parameters.len() != 1;
-                let mut string = std::string::String::new();
-                if show_parens {
-                    string.push('(');
-                }
-                string.push_str(&parameters.iter()
-                    .map(|param| param.show(symbols))
-                    .collect::<Vec<_>>()
-                    .join(", "));
-                if show_parens {
-                    string.push(')');
-                }
-                string.push_str(" -> ");
-                string.push_str(&return_type.show(symbols));
-                string
-            },
             Int => "int".to_string(),
-            Name(_, ref typ) => {
-                if let Some(ref typ) = *typ {
-                    typ.show(symbols)
-                }
-                else {
-                    "unresolved type".to_string()
-                }
-            },
-            Nil => "nil".to_string(),
             Record { name, .. } => format!("struct {}", symbols.name(name)),
             String => "string".to_string(),
+            TypeConstructor::Unique(_, _) => "".to_string(),
             Unit => "()".to_string(),
-            Error => "type error".to_string(),
         }
     }
 }

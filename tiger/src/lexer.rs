@@ -189,6 +189,7 @@ impl<R: Read> Lexer<R> {
                 "new" => New,
                 "nil" => Nil,
                 "of" => Of,
+                "poly" => Poly,
                 "pure" => Pure,
                 "then" => Then,
                 "to" => To,

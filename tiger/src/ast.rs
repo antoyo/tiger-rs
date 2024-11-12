@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2024 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -147,6 +147,7 @@ pub struct FuncDeclaration {
     pub params: Vec<FieldWithPos>,
     pub pure: bool,
     pub result: Option<SymbolWithPos>,
+    pub ty_vars: TypeVars,
 }
 
 pub type FuncDeclarationWithPos = WithPos<FuncDeclaration>;
@@ -178,7 +179,24 @@ pub struct RecordField {
 pub type RecordFieldWithPos = WithPos<RecordField>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Ty {
+pub struct Ty {
+    pub typ: InnerTypeWithPos,
+    pub args: TypeArgsWithPos,
+}
+
+impl Ty {
+    pub fn new(typ: InnerTypeWithPos) -> Self {
+        Self {
+            args: WithPos::new(TypeArgs {
+                types: vec![],
+            }, typ.pos),
+            typ,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum InnerType {
     Array {
         ident: SymbolWithPos,
     },
@@ -195,11 +213,34 @@ pub enum Ty {
     Unit,
 }
 
+pub type InnerTypeWithPos = WithPos<InnerType>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeDec {
     pub name: SymbolWithPos,
     pub ty: TyWithPos,
+    pub ty_vars: TypeVars,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeVars {
+    pub idents: Vec<SymbolWithPos>,
+}
+
+impl TypeVars {
+    pub fn new() -> Self {
+        Self {
+            idents: vec![],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeArgs {
+    pub types: Vec<TyWithPos>,
+}
+
+pub type TypeArgsWithPos = WithPos<TypeArgs>;
 
 pub type TypeDecWithPos = WithPos<TypeDec>;
 
