@@ -37,7 +37,7 @@ pub enum Declaration {
         escape: bool, // TODO: is this field actually used?
         init: ExprWithPos,
         name: Symbol,
-        typ: Option<SymbolWithPos>,
+        typ: Option<TyWithPos>,
     },
 }
 
@@ -58,12 +58,13 @@ pub enum Expr {
     Call {
         args: Vec<ExprWithPos>,
         function: Box<ExprWithPos>,
+        type_args: TypeArgsWithPos,
     },
     Closure {
         body: Box<ExprWithPos>,
         params: Vec<FieldWithPos>,
         pure: bool,
-        result: Option<SymbolWithPos>,
+        result: Option<TyWithPos>,
     },
     ClosureParamField {
         ident: SymbolWithPos,
@@ -113,6 +114,7 @@ pub enum Expr {
     Record {
         fields: Vec<RecordFieldWithPos>,
         typ: SymbolWithPos,
+        type_args: TypeArgsWithPos,
     },
     Sequence(Vec<ExprWithPos>),
     Str {
@@ -135,7 +137,7 @@ pub type ExprWithPos = WithPos<Expr>;
 pub struct Field {
     pub escape: bool,
     pub name: Symbol,
-    pub typ: SymbolWithPos,
+    pub typ: TyWithPos,
 }
 
 pub type FieldWithPos = WithPos<Field>;
@@ -146,7 +148,7 @@ pub struct FuncDeclaration {
     pub name: SymbolWithPos,
     pub params: Vec<FieldWithPos>,
     pub pure: bool,
-    pub result: Option<SymbolWithPos>,
+    pub result: Option<TyWithPos>,
     pub ty_vars: TypeVars,
 }
 
@@ -238,6 +240,14 @@ impl TypeVars {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeArgs {
     pub types: Vec<TyWithPos>,
+}
+
+impl TypeArgs {
+    pub fn empty() -> Self {
+        Self {
+            types: vec![],
+        }
+    }
 }
 
 pub type TypeArgsWithPos = WithPos<TypeArgs>;

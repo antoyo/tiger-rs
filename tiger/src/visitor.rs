@@ -74,7 +74,7 @@ pub trait Visitor {
             },
             Expr::Break => {
             },
-            Expr::Call { ref args, ref function } => {
+            Expr::Call { ref args, ref function, .. } => {
                 self.visit_call(function, args);
             },
             Expr::Closure { ref body, .. } => {

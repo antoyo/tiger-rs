@@ -200,6 +200,7 @@ impl<'a, R: Read> Parser<'a, R> {
             expr = WithPos::new(Expr::Call {
                 args,
                 function: Box::new(expr),
+                type_args: WithPos::dummy(TypeArgs::empty()),
             }, pos.grow(end_pos));
         }
         Ok(expr)
@@ -209,18 +210,28 @@ impl<'a, R: Read> Parser<'a, R> {
         let name;
         let pos = eat!(self, Ident, name);
         let symbol = self.symbols.symbol(&name);
+        let type_args =
+            match self.peek()?.token {
+                ColonColon => self.ty_args()?,
+                _ => {
+                    WithPos::new(TypeArgs {
+                        types: vec![],
+                    }, Pos::dummy())
+                },
+            };
         if let OpenParen = self.peek()?.token {
             let (args, end_pos) = self.call_args()?;
             let call = WithPos::new(Expr::Call {
                 args,
                 function: Box::new(WithPos::new(Expr::Variable(WithPos::new(symbol, pos)), pos)),
+                type_args,
             }, pos.grow(end_pos));
             let call = self.more_calls(call)?;
             Ok(call)
         }
         else {
             match self.peek()?.token {
-                OpenCurly => self.rec_create(WithPos::new(symbol, pos), pos),
+                OpenCurly => self.rec_create(WithPos::new(symbol, pos), type_args, pos),
                 _ => {
                     let var = WithPos::new(Expr::Variable(WithPos::new(symbol, pos)), pos);
                     self.lvalue_or_assign(var)
@@ -298,13 +309,11 @@ impl<'a, R: Read> Parser<'a, R> {
         let pos = eat!(self, Ident, field_name);
         let name = self.symbols.symbol(&field_name);
         eat!(self, Colon);
-        let type_name;
-        let type_pos = eat!(self, Ident, type_name);
-        let typ = self.symbols.symbol(&type_name);
+        let typ = self.ty()?;
         Ok(WithPos::new(Field {
             escape: false,
             name,
-            typ: WithPos::new(typ, type_pos),
+            typ,
         }, pos))
     }
 
@@ -629,14 +638,12 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(WithPos::new(Expr::Nil, pos))
     }
 
-    fn optional_type(&mut self) -> Result<Option<SymbolWithPos>> {
+    fn optional_type(&mut self) -> Result<Option<TyWithPos>> {
         let mut typ = None;
         if let Colon = self.peek()?.token {
             eat!(self, Colon);
-            let type_name;
-            let pos = eat!(self, Ident, type_name);
-            let ident = self.symbols.symbol(&type_name);
-            typ = Some(WithPos::new(ident, pos));
+            let return_type = self.ty()?;
+            typ = Some(return_type);
         }
         Ok(typ)
     }
@@ -659,7 +666,7 @@ impl<'a, R: Read> Parser<'a, R> {
         }
     }
 
-    fn rec_create(&mut self, typ: SymbolWithPos, pos: Pos) -> Result<ExprWithPos> {
+    fn rec_create(&mut self, typ: SymbolWithPos, type_args: TypeArgsWithPos, pos: Pos) -> Result<ExprWithPos> {
         eat!(self, OpenCurly);
         let field = self.field_create()?;
         let mut fields = vec![field];
@@ -672,6 +679,7 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(WithPos::new(Expr::Record {
             fields,
             typ,
+            type_args,
         }, pos))
     }
 
@@ -763,7 +771,7 @@ impl<'a, R: Read> Parser<'a, R> {
                         }, pos)), pos);
                     },
                     Lesser => {
-                        let args = self.ty_args()?;
+                        let args = self.inner_type_args()?;
                         let pos = pos.grow(args.pos);
                         ty.pos = pos;
                         ty.node.args = args;
@@ -843,6 +851,13 @@ impl<'a, R: Read> Parser<'a, R> {
     }
 
     fn ty_args(&mut self) -> Result<TypeArgsWithPos> {
+        let pos = eat!(self, ColonColon);
+        let mut args = self.inner_type_args()?;
+        args.pos = pos.grow(args.pos);
+        Ok(args)
+    }
+
+    fn inner_type_args(&mut self) -> Result<TypeArgsWithPos> {
         let mut types = vec![];
         let pos = eat!(self, Lesser);
         loop {
