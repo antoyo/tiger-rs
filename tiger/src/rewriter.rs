@@ -57,7 +57,7 @@ impl<'a> Rewriter<'a> {
                 }, pos)
             },
             Expr::Break => WithPos::new(Expr::Break, pos),
-            Expr::Call { args, function } => {
+            Expr::Call { args, function, type_args } => {
                 let mut new_args = vec![];
                 let mut declarations = vec![];
                 for arg in args {
@@ -74,6 +74,7 @@ impl<'a> Rewriter<'a> {
                 let call = WithPos::new(Expr::Call {
                     args: new_args,
                     function,
+                    type_args,
                 }, pos);
 
                 if declarations.is_empty() {
@@ -235,7 +236,7 @@ impl<'a> Rewriter<'a> {
                     add_declarations(oper, declarations, pos)
                 }
             },
-            Expr::Record { fields, typ } => {
+            Expr::Record { fields, typ, type_args } => {
                 let mut new_fields = vec![];
                 let mut declarations = vec![];
                 for mut field in fields {
@@ -257,6 +258,7 @@ impl<'a> Rewriter<'a> {
                     WithPos::new(Expr::Record {
                         fields: new_fields,
                         typ,
+                        type_args,
                     }, pos);
                 if declarations.is_empty() {
                     record

@@ -68,7 +68,7 @@ use gen::{
 };
 use ir::{Exp, Statement, _Statement};
 use position::{Pos, WithPos};
-use crate::ast::{InnerType, TypeVars};
+use crate::ast::{InnerType, Ty, TypeArgs, TypeVars};
 use crate::types::{TyVar, TypeConstructor};
 
 use self::AddError::*;
@@ -157,7 +157,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Sequence(vec![expr, WithPos::new(Expr::Int { value: 0 }, pos)]),
             pos,
         );
-        let result = Some(WithPos::new(self.env.type_symbol("int"), pos));
+        let result = Some(WithPos::new(Ty::new(WithPos::new(InnerType::Name {
+            ident: WithPos::new(self.env.type_symbol("int"), pos),
+        }, pos)), pos));
         self.trans_dec(&WithPos::new(Declaration::Function(vec![
             WithPos::new(FuncDeclaration {
                 body,
@@ -378,7 +380,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 let mut param_types = vec![];
                                 let mut param_set = HashSet::new();
                                 for param in params {
-                                    param_types.push(self.get_type(&param.node.typ, AddError));
+                                    param_types.push(self.trans_ty(param.node.name, &param.node.typ));
                                     param_names.push(param.node.name);
                                     if !param_set.insert(param.node.name) {
                                         self.duplicate_param(param);
@@ -386,7 +388,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 }
                                 let return_type =
                                     if let Some(ref result) = function.node.result {
-                                        self.get_type(result, AddError)
+                                        // TODO: use dummy symbol instead?
+                                        let symbol = self.symbols.unnamed();
+                                        self.trans_ty(symbol, result)
                                     }
                                     else {
                                         Type::new_unit()
@@ -428,7 +432,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 };
                             let typ =
                                 if let Some(ref typ) = *typ {
-                                    let typ = self.get_type(typ, AddError);
+                                    // TODO: use dummy symbol instead?
+                                    let symbol = self.symbols.unnamed();
+                                    let typ = self.trans_ty(symbol, typ);
                                     self.check_types(&typ, &exp.ty, init.pos);
                                     typ
                                 }
@@ -508,7 +514,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let level = Level::new(parent_level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
                     let result_type =
                         if let Some(ref result) = *result {
-                            self.get_type(result, AddError)
+                            // TODO: use dummy symbol instead?
+                            let symbol = self.symbols.unnamed();
+                            self.trans_ty(symbol, result)
                         }
                         else if pure {
                             Type::new_answer()
@@ -521,7 +529,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let mut parameters = vec![];
                     let mut param_set = HashSet::new();
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, AddError));
+                        parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                         param_names.push(param.node.name);
                         if !param_set.insert(param.node.name) {
                             self.duplicate_param(param);
@@ -549,7 +557,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.in_pure_fun = pure;
                     let result_type =
                         if let Some(ref result) = *result {
-                            self.get_type(result, DontAddError)
+                            // TODO: use dummy symbol instead?
+                            let symbol = self.symbols.unnamed();
+                            // TODO: don't add the error here.
+                            self.trans_ty(symbol, result)
                         }
                         else if pure {
                             Type::new_answer()
@@ -560,7 +571,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let mut param_names = vec![];
                     let mut parameters = vec![];
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, DontAddError));
+                        parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                         param_names.push(param.node.name);
                     }
                     self.env.begin_scope();
@@ -605,7 +616,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.temp_map.insert::<F>(&access.1);
                 }
                 if let Some(ref ident) = *typ {
-                    let typ = self.get_type(ident, AddError);
+                    // TODO: use dummy symbol instead?
+                    let symbol = self.symbols.unnamed();
+                    let typ = self.trans_ty(symbol, ident);
                     self.check_types(&typ, &exp.ty, ident.pos);
                 } else if exp.ty == Type::Nil {
                     self.add_error(Error::RecordType { pos: declaration.pos });
@@ -696,7 +709,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     ty: Type::new_unit(),
                 }
             },
-            Expr::Call { ref args, ref function } => {
+            Expr::Call { ref args, ref function, ref type_args } => {
                 match function.node {
                     Expr::Variable(ref func) => {
                         match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
@@ -793,7 +806,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let result_type =
                     if let Some(ref result) = *result {
-                        self.get_type(result, AddError)
+                        // TODO: use dummy symbol instead?
+                        let symbol = self.symbols.unnamed();
+                        self.trans_ty(symbol, result)
                     }
                     else if pure {
                         Type::new_answer()
@@ -813,7 +828,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let mut parameters = vec![];
                     let mut param_set = HashSet::new();
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, AddError));
+                        parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                         param_names.push(param.node.name);
                         if !param_set.insert(param.node.name) {
                             self.duplicate_param(param);
@@ -855,7 +870,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let mut parameters = vec![];
                 for param in params {
-                    parameters.push(self.get_type(&param.node.typ, DontAddError));
+                    parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                 }
 
                 let mut types = parameters;
@@ -882,6 +897,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let closure = self.trans_exp(&WithPos::new(Expr::Record {
                     fields,
                     typ: WithPos::new(closure_symbol, pos),
+                    type_args: WithPos::dummy(TypeArgs::empty()),
                 }, pos), level, done_label, true);
                 ExpTy {
                     exp: closure.exp,
@@ -1155,7 +1171,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     ty: Type::new_int(),
                 }
             },
-            Expr::Record { ref fields, ref typ } => {
+            Expr::Record { ref fields, ref typ, ref type_args } => {
                 let ty = self.get_type(typ, AddError);
                 let mut field_exprs = vec![];
                 let data_layout =
@@ -1330,6 +1346,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         let closure = self.trans_exp(&WithPos::new(Expr::Record {
                             fields,
                             typ: WithPos::new(closure_symbol, pos),
+                            type_args: WithPos::dummy(TypeArgs::empty()),
                         }, pos), level, done_label, true);
                         ExpTy {
                             exp: closure.exp,
@@ -1405,7 +1422,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let mut types = vec![];
                 let mut data_layout = String::new();
                 for field in fields {
-                    let typ = self.get_type(&field.node.typ, AddError);
+                    let typ = self.trans_ty(name, &field.node.typ);
                     let is_pointer =
                         match typ {
                             Type::Var(ref ty_var) if ty_var.0 == name => true,

@@ -1,0 +1,45 @@
+let type list<e> = {
+    head: e,
+    tail: list<e>
+}
+
+    function append<e>(a: list<e>, b: list<e>): list<e> =
+        if a = nil then
+            b
+        else
+            list::<e> {
+                head = a.head,
+                tail = append::<e>(a.tail, b)
+            }
+
+    var one4: list<int> := list::<int> {
+        head = 4,
+        tail = nil
+    }
+    var two4s: list<int> := append::<int>(one4, one4)
+
+    type pair<a> = {
+        first: a,
+        second: a
+    }
+    type twosome<a> = {
+        first: a,
+        second: a
+    }
+
+    function f(a: pair<int>): pair<int> = a
+
+    var string_pair := pair::<string> {
+        first = "test",
+        second = "2"
+    }
+    /* FIXME: there's conflict between `var < 12` and `func<int>()`, so find a way to differentiate the syntax. */
+    var my_two_some := twosome::<int> {
+        first = 4,
+        second = 2
+    }
+
+in
+    f(string_pair); /* Should be an error. */
+    f(my_two_some) /* Should be an error. */
+end
