@@ -48,6 +48,7 @@ fn test_execution() {
         "loops",
         "merge",
         "nested",
+        "polymorphism",
         "prettyprint",
         "pureTree",
         "queens",

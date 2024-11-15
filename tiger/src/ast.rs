@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2024 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -37,7 +37,7 @@ pub enum Declaration {
         escape: bool, // TODO: is this field actually used?
         init: ExprWithPos,
         name: Symbol,
-        typ: Option<SymbolWithPos>,
+        typ: Option<TyWithPos>,
     },
 }
 
@@ -58,12 +58,13 @@ pub enum Expr {
     Call {
         args: Vec<ExprWithPos>,
         function: Box<ExprWithPos>,
+        type_args: TypeArgsWithPos,
     },
     Closure {
         body: Box<ExprWithPos>,
         params: Vec<FieldWithPos>,
         pure: bool,
-        result: Option<SymbolWithPos>,
+        result: Option<TyWithPos>,
     },
     ClosureParamField {
         ident: SymbolWithPos,
@@ -113,6 +114,7 @@ pub enum Expr {
     Record {
         fields: Vec<RecordFieldWithPos>,
         typ: SymbolWithPos,
+        type_args: TypeArgsWithPos,
     },
     Sequence(Vec<ExprWithPos>),
     Str {
@@ -135,7 +137,7 @@ pub type ExprWithPos = WithPos<Expr>;
 pub struct Field {
     pub escape: bool,
     pub name: Symbol,
-    pub typ: SymbolWithPos,
+    pub typ: TyWithPos,
 }
 
 pub type FieldWithPos = WithPos<Field>;
@@ -146,7 +148,8 @@ pub struct FuncDeclaration {
     pub name: SymbolWithPos,
     pub params: Vec<FieldWithPos>,
     pub pure: bool,
-    pub result: Option<SymbolWithPos>,
+    pub result: Option<TyWithPos>,
+    pub ty_vars: TypeVars,
 }
 
 pub type FuncDeclarationWithPos = WithPos<FuncDeclaration>;
@@ -178,7 +181,24 @@ pub struct RecordField {
 pub type RecordFieldWithPos = WithPos<RecordField>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Ty {
+pub struct Ty {
+    pub typ: InnerTypeWithPos,
+    pub args: TypeArgsWithPos,
+}
+
+impl Ty {
+    pub fn new(typ: InnerTypeWithPos) -> Self {
+        Self {
+            args: WithPos::new(TypeArgs {
+                types: vec![],
+            }, typ.pos),
+            typ,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum InnerType {
     Array {
         ident: SymbolWithPos,
     },
@@ -195,11 +215,42 @@ pub enum Ty {
     Unit,
 }
 
+pub type InnerTypeWithPos = WithPos<InnerType>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeDec {
     pub name: SymbolWithPos,
     pub ty: TyWithPos,
+    pub ty_vars: TypeVars,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeVars {
+    pub idents: Vec<SymbolWithPos>,
+}
+
+impl TypeVars {
+    pub fn new() -> Self {
+        Self {
+            idents: vec![],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeArgs {
+    pub types: Vec<TyWithPos>,
+}
+
+impl TypeArgs {
+    pub fn empty() -> Self {
+        Self {
+            types: vec![],
+        }
+    }
+}
+
+pub type TypeArgsWithPos = WithPos<TypeArgs>;
 
 pub type TypeDecWithPos = WithPos<TypeDec>;
 

@@ -35,7 +35,6 @@ use ast::{
     Operator,
     RecordField,
     RecordFieldWithPos,
-    Ty,
     TypeDec,
     TypeDecWithPos,
     TyWithPos,
@@ -69,6 +68,9 @@ use gen::{
 };
 use ir::{Exp, Statement, _Statement};
 use position::{Pos, WithPos};
+use crate::ast::{InnerType, Ty, TypeArgs, TypeVars};
+use crate::types::{TyVar, TypeConstructor};
+
 use self::AddError::*;
 use symbol::{Strings, Symbol, Symbols, SymbolWithPos};
 use temp::{Label, TempMap};
@@ -77,7 +79,6 @@ use types::{
     ClassMethod,
     FunctionType,
     Type,
-    Unique,
 };
 use visitor::Visitor;
 
@@ -156,7 +157,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Sequence(vec![expr, WithPos::new(Expr::Int { value: 0 }, pos)]),
             pos,
         );
-        let result = Some(WithPos::new(self.env.type_symbol("int"), pos));
+        let result = Some(WithPos::new(Ty::new(WithPos::new(InnerType::Name {
+            ident: WithPos::new(self.env.type_symbol("int"), pos),
+        }, pos)), pos));
         self.trans_dec(&WithPos::new(Declaration::Function(vec![
             WithPos::new(FuncDeclaration {
                 body,
@@ -164,6 +167,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 params: vec![],
                 pure: false,
                 result,
+                ty_vars: TypeVars::new(),
             }, pos)
         ]), pos), &gen::outermost(), None);
         if self.errors.is_empty() {
@@ -174,10 +178,16 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         }
     }
 
-    fn actual_ty(&mut self, typ: &Type) -> Type {
+    fn actual_ty(&self, typ: &Type) -> Type {
         match *typ {
-            Type::Name(_, Some(ref typ)) => *typ.clone(),
-            Type::Name(ref symbol, None) => self.get_type(symbol, DontAddError),
+            Type::Var(ref type_var) => {
+                if let Some(actual_type) = self.env.look_type(type_var.0) {
+                    if typ != actual_type {
+                        return self.actual_ty(actual_type);
+                    }
+                }
+                Type::Error
+            },
             ref typ => typ.clone(),
         }
     }
@@ -193,7 +203,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         self.check_int(&right, right_pos);
         ExpTy {
             exp: binary_oper(oper, left.exp, right.exp),
-            ty: Type::Int,
+            ty: Type::new_int(),
         }
     }
 
@@ -201,7 +211,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         let mut names = HashSet::new();
         for typ in types {
             names.insert(typ.node.name.node);
-            if let Ty::Name { ref ident } = typ.node.ty.node {
+            if let InnerType::Name { ref ident } = typ.node.ty.node.typ.node {
                 if names.contains(&ident.node) {
                     self.add_error(Error::Cycle {
                         pos: typ.node.ty.pos,
@@ -213,9 +223,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn check_int(&mut self, expr: &ExpTy, pos: Pos) {
-        if expr.ty != Type::Int && expr.ty != Type::Error {
+        if expr.ty != Type::new_int() && expr.ty != Type::Error {
             self.add_error(Error::Type {
-                expected: Type::Int,
+                expected: Type::new_int(),
                 pos,
                 unexpected: expr.ty.clone(),
             });
@@ -236,27 +246,33 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         let expected = self.actual_ty(expected);
         let unexpected = self.actual_ty(unexpected);
         if expected != unexpected && expected != Type::Error && unexpected != Type::Error {
-            if let Type::Class { .. } | Type::Record { .. } = expected {
-                if unexpected == Type::Nil {
-                    return;
+            if let Type::App(TypeConstructor::Unique(ref expected_inner_type, _), _) = expected {
+                if let TypeConstructor::Class { .. } | TypeConstructor::Record { .. } = **expected_inner_type {
+                    if unexpected == Type::Nil {
+                        return;
+                    }
                 }
-            }
 
-            if let Type::Class { name: parent_class, .. } = expected {
-                if let Type::Class { name, .. } = unexpected {
-                    let mut current_class = name;
-                    loop {
-                        if current_class == parent_class {
-                            // NOTE: the expected type is a parent class.
-                            return;
-                        }
-                        let class = self.get_type(&WithPos::dummy(current_class), DontAddError);
-                        if let Type::Class { parent_class, .. } = class {
-                            if let Some(parent_class) = parent_class {
-                                current_class = parent_class.node;
-                            }
-                            else {
-                                break;
+                if let TypeConstructor::Class { name: parent_class, .. } = **expected_inner_type {
+                    if let Type::App(TypeConstructor::Unique(ref unexpected_inner_type, _), _) = unexpected {
+                        if let TypeConstructor::Class { name, .. } = **unexpected_inner_type {
+                            let mut current_class = name;
+                            loop {
+                                if current_class == parent_class {
+                                    // NOTE: the expected type is a parent class.
+                                    return;
+                                }
+                                let class = self.get_type(&WithPos::dummy(current_class), DontAddError);
+                                if let Type::App(TypeConstructor::Unique(inner_type, _), _) = class {
+                                    if let TypeConstructor::Class { parent_class, .. } = *inner_type {
+                                        if let Some(parent_class) = parent_class {
+                                            current_class = parent_class.node;
+                                        }
+                                        else {
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -264,9 +280,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             }
 
             self.add_error(Error::Type {
-                expected,
+                expected: expected.clone(),
                 pos,
-                unexpected,
+                unexpected: unexpected.clone(),
             });
         }
     }
@@ -320,15 +336,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     return_type: Type,
                 }
 
-                let empty_class_type = Type::Class {
+                let empty_class_type = Type::App(TypeConstructor::new_unique(TypeConstructor::Class {
                     data_layout: String::new(),
                     fields: vec![],
                     methods: vec![],
                     name: name.node,
                     parent_class: Some(parent_class.clone()),
-                    unique: Unique::new(),
                     vtable_name: Label::new(),
-                };
+                }), vec![]);
                 self.env.enter_type(name.node, empty_class_type);
 
                 let old_escaping_vars = mem::take(&mut self.escaping_vars);
@@ -336,15 +351,24 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let mut pending_methods = vec![];
                 let parent_type = self.get_type(parent_class, AddError);
-                match parent_type {
-                    Type::Class { .. } | Type::Error => (),
-                    _ => {
-                        self.add_error(Error::NotAClass {
-                            pos: parent_class.pos,
-                            typ: parent_type,
-                        });
-                    },
+                let not_a_class =
+                    match parent_type {
+                        Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+                            match **inner_type {
+                                TypeConstructor::Class { .. } => false,
+                                _ => true
+                            }
+                        },
+                        Type::Error => false,
+                        _ => true,
+                    };
+                if not_a_class {
+                    self.add_error(Error::NotAClass {
+                        pos: parent_class.pos,
+                        typ: parent_type,
+                    });
                 }
+
                 let (mut fields, mut data_layout, parent_methods) = self.parent_members(parent_class);
                 let mut methods = vec![];
                 for declaration in declarations {
@@ -356,7 +380,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 let mut param_types = vec![];
                                 let mut param_set = HashSet::new();
                                 for param in params {
-                                    param_types.push(self.get_type(&param.node.typ, AddError));
+                                    param_types.push(self.trans_ty(param.node.name, &param.node.typ));
                                     param_names.push(param.node.name);
                                     if !param_set.insert(param.node.name) {
                                         self.duplicate_param(param);
@@ -364,10 +388,12 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 }
                                 let return_type =
                                     if let Some(ref result) = function.node.result {
-                                        self.get_type(result, AddError)
+                                        // TODO: use dummy symbol instead?
+                                        let symbol = self.symbols.unnamed();
+                                        self.trans_ty(symbol, result)
                                     }
                                     else {
-                                        Type::Unit
+                                        Type::new_unit()
                                     };
 
                                 let mut formals: Vec<_> = params.iter()
@@ -401,13 +427,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             let exp = self.trans_exp(init, parent_level, done_label.clone(), true);
                             let is_pointer =
                                 match exp.ty {
-                                    Type::Name(ref symbol, None) if symbol.node == name =>
-                                        true,
+                                    Type::Var(ref ty_var) if ty_var.0 == name => true,
                                     _ => self.actual_ty(&exp.ty).is_pointer(),
                                 };
                             let typ =
                                 if let Some(ref typ) = *typ {
-                                    let typ = self.get_type(typ, AddError);
+                                    // TODO: use dummy symbol instead?
+                                    let symbol = self.symbols.unnamed();
+                                    let typ = self.trans_ty(symbol, typ);
                                     self.check_types(&typ, &exp.ty, init.pos);
                                     typ
                                 }
@@ -432,15 +459,14 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let class_name = self.strings.get(name.node).expect("string get");
                 let vtable_name = Label::with_name(&format!("__vtable_{}", class_name));
                 let methods = self.inherit_methods(parent_methods, &methods);
-                let class_type = Type::Class {
+                let class_type = Type::App(TypeConstructor::new_unique(TypeConstructor::Class {
                     data_layout,
                     fields,
                     methods: methods.clone(),
                     name: name.node,
                     parent_class: Some(parent_class.clone()),
-                    unique: Unique::new(),
                     vtable_name: vtable_name.clone(),
-                };
+                }), vec![]);
                 self.env.replace_type(name.node, class_type.clone());
 
                 for method in pending_methods {
@@ -451,11 +477,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         access: formals.next().expect("self parameter").clone(),
                         typ: class_type.clone(),
                     });
-                    let fields =
-                        match class_type {
-                            Type::Class { ref fields, .. } => fields,
-                            _ => unreachable!(),
-                        };
+                    let fields = get_class_fields(&class_type);
                     for field in fields {
                         self.env.enter_var(field.name, Entry::ClassField { class: class_type.clone() });
                     }
@@ -492,20 +514,22 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let level = Level::new(parent_level, Label::with_name(&self.strings.get(func_name).expect("string get")), formals);
                     let result_type =
                         if let Some(ref result) = *result {
-                            self.get_type(result, AddError)
+                            // TODO: use dummy symbol instead?
+                            let symbol = self.symbols.unnamed();
+                            self.trans_ty(symbol, result)
                         }
                         else if pure {
-                            Type::Answer
+                            Type::new_answer()
                         }
                         else {
-                            Type::Unit
+                            Type::new_unit()
                         };
                     // TODO: error when name already exist?
                     let mut param_names = vec![];
                     let mut parameters = vec![];
                     let mut param_set = HashSet::new();
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, AddError));
+                        parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                         param_names.push(param.node.name);
                         if !param_set.insert(param.node.name) {
                             self.duplicate_param(param);
@@ -533,18 +557,21 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.in_pure_fun = pure;
                     let result_type =
                         if let Some(ref result) = *result {
-                            self.get_type(result, DontAddError)
+                            // TODO: use dummy symbol instead?
+                            let symbol = self.symbols.unnamed();
+                            // TODO: don't add the error here.
+                            self.trans_ty(symbol, result)
                         }
                         else if pure {
-                            Type::Answer
+                            Type::new_answer()
                         }
                         else {
-                            Type::Unit
+                            Type::new_unit()
                         };
                     let mut param_names = vec![];
                     let mut parameters = vec![];
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, DontAddError));
+                        parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                         param_names.push(param.node.name);
                     }
                     self.env.begin_scope();
@@ -566,12 +593,26 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Declaration::Type(ref type_declarations) => {
                 self.check_duplicate_types(type_declarations);
                 for &WithPos { node: TypeDec { ref name, .. }, .. } in type_declarations {
-                    self.env.enter_type(name.node, Type::Name(name.clone(), None));
+                    self.env.enter_type(name.node, Type::Var(TyVar::from_symbol(name.node)));
                 }
 
-                for &WithPos { node: TypeDec { ref name, ref ty }, .. } in type_declarations {
+                for &WithPos { node: TypeDec { ref name, ref ty, ref ty_vars, .. }, .. } in type_declarations {
+                    let has_type_args = !ty_vars.idents.is_empty();
+                    if has_type_args {
+                        self.env.begin_type_scope();
+                    }
+                    let mut type_vars = vec![];
+                    for var in &ty_vars.idents {
+                        let type_var = self.new_type_var();
+                        type_vars.push(type_var);
+                        self.env.enter_type(var.node, Type::Var(type_var));
+                    }
+
                     let new_type = self.trans_ty(name.node, ty);
-                    self.env.replace_type(name.node, new_type);
+                    if has_type_args {
+                        self.env.end_type_scope();
+                    }
+                    self.env.enter_type(name.node, new_type);
                 }
                 None
             },
@@ -589,7 +630,9 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.temp_map.insert::<F>(&access.1);
                 }
                 if let Some(ref ident) = *typ {
-                    let typ = self.get_type(ident, AddError);
+                    // TODO: use dummy symbol instead?
+                    let symbol = self.symbols.unnamed();
+                    let typ = self.trans_ty(symbol, ident);
                     self.check_types(&typ, &exp.ty, ident.pos);
                 } else if exp.ty == Type::Nil {
                     self.add_error(Error::RecordType { pos: declaration.pos });
@@ -628,7 +671,12 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let ty = self.get_type(typ, AddError);
                 let inner_type =
                     match ty {
-                        Type::Array(ref typ, _) => typ,
+                        Type::App(TypeConstructor::Unique(ref inner_type, _), ref types) => {
+                            match **inner_type {
+                                TypeConstructor::Array => &types[0],
+                                _ => &Type::Error,
+                            }
+                        },
                         Type::Error => &Type::Error,
                         _ => unreachable!(),
                     };
@@ -660,7 +708,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 self.check_types(&var.ty, &expr_expr.ty, expr.pos);
                 ExpTy {
                     exp: Exp::ExpSequence(Box::new(_Statement::Move(var.exp, expr_expr.exp).into()), Box::new(unit())),
-                    ty: Type::Unit,
+                    ty: Type::new_unit(),
                 }
             },
             Expr::Break => {
@@ -672,10 +720,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
                 ExpTy {
                     exp: goto(done_label.expect("break should be in while loop")),
-                    ty: Type::Unit,
+                    ty: Type::new_unit(),
                 }
             },
-            Expr::Call { ref args, ref function } => {
+            Expr::Call { ref args, ref function, ref type_args } => {
                 match function.node {
                     Expr::Variable(ref func) => {
                         match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
@@ -738,7 +786,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
 
-                let mut types = vec![(function_pointer_symbol, Type::Int)];
+                let mut types = vec![(function_pointer_symbol, Type::new_int())];
 
                 for field in &env_fields {
                     let is_pointer = self.actual_ty(&field.typ).is_pointer();
@@ -753,12 +801,11 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let data_layout = self.gen.string_literal(data_layout);
 
                 let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
-                let record_type = Type::Record {
+                let record_type = Type::App(TypeConstructor::new_unique(TypeConstructor::Record {
                     data_layout,
                     name: closure_symbol,
                     types,
-                    unique: Unique::new(),
-                };
+                }), vec![]);
                 self.env.enter_type(closure_symbol, record_type.clone());
 
                 let function =
@@ -768,17 +815,20 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         params: params.clone(),
                         pure: false,
                         result: result.clone(),
+                        ty_vars: TypeVars::new(),
                     };
 
                 let result_type =
                     if let Some(ref result) = *result {
-                        self.get_type(result, AddError)
+                        // TODO: use dummy symbol instead?
+                        let symbol = self.symbols.unnamed();
+                        self.trans_ty(symbol, result)
                     }
                     else if pure {
-                        Type::Answer
+                        Type::new_answer()
                     }
                     else {
-                        Type::Unit
+                        Type::new_unit()
                     };
 
                 {
@@ -792,7 +842,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     let mut parameters = vec![];
                     let mut param_set = HashSet::new();
                     for param in params {
-                        parameters.push(self.get_type(&param.node.typ, AddError));
+                        parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                         param_names.push(param.node.name);
                         if !param_set.insert(param.node.name) {
                             self.duplicate_param(param);
@@ -834,13 +884,12 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let mut parameters = vec![];
                 for param in params {
-                    parameters.push(self.get_type(&param.node.typ, DontAddError));
+                    parameters.push(self.trans_ty(param.node.name, &param.node.typ));
                 }
 
-                let ty = Type::Function {
-                    parameters,
-                    return_type: Box::new(result_type),
-                };
+                let mut types = parameters;
+                types.push(result_type);
+                let ty = Type::App(TypeConstructor::Arrow, types);
 
                 self.closure_index += 1;
 
@@ -862,6 +911,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let closure = self.trans_exp(&WithPos::new(Expr::Record {
                     fields,
                     typ: WithPos::new(closure_symbol, pos),
+                    type_args: WithPos::dummy(TypeArgs::empty()),
                 }, pos), level, done_label, true);
                 ExpTy {
                     exp: closure.exp,
@@ -885,27 +935,32 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Field { ref ident, ref this } => {
                 let var = self.trans_exp(this, level, done_label, true);
                 match var.ty {
-                    Type::Class { name: class_type, ref fields, .. } => {
-                        for (index, class_field) in fields.iter().enumerate() {
-                            if class_field.name == ident.node {
-                                return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Class),
-                                    ty: class_field.typ.clone(),
-                                };
-                            }
+                    Type::App(TypeConstructor::Unique(inner_type, _), _) => {
+                        match *inner_type {
+                            TypeConstructor::Class { name: class_type, ref fields, .. } => {
+                                for (index, class_field) in fields.iter().enumerate() {
+                                    if class_field.name == ident.node {
+                                        return ExpTy {
+                                            exp: field_access::<F>(var.exp, index, FieldType::Class),
+                                            ty: class_field.typ.clone(),
+                                        };
+                                    }
+                                }
+                                self.unexpected_field(ident, ident.pos, class_type)
+                            },
+                            TypeConstructor::Record { name: record_type, ref types, .. } => {
+                                for (index, &(name, ref typ)) in types.iter().enumerate() {
+                                    if name == ident.node {
+                                        return ExpTy {
+                                            exp: field_access::<F>(var.exp, index, FieldType::Record),
+                                            ty: typ.clone(),
+                                        };
+                                    }
+                                }
+                                self.unexpected_field(ident, ident.pos, record_type)
+                            },
+                            _ => EXP_TYPE_ERROR,
                         }
-                        self.unexpected_field(ident, ident.pos, class_type)
-                    },
-                    Type::Record { name: record_type, ref types, .. } => {
-                        for (index, &(name, ref typ)) in types.iter().enumerate() {
-                            if name == ident.node {
-                                return ExpTy {
-                                    exp: field_access::<F>(var.exp, index, FieldType::Record),
-                                    ty: typ.clone(),
-                                };
-                            }
-                        }
-                        self.unexpected_field(ident, ident.pos, record_type)
                     },
                     Type::Error => EXP_TYPE_ERROR,
                     typ => {
@@ -920,13 +975,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::ClosurePointer { label } => {
                 ExpTy {
                     exp: Exp::Name(Label::with_name(&self.strings.get(label).expect("label"))),
-                    ty: Type::Int,
+                    ty: Type::new_int(),
                 }
             },
             Expr::FunctionPointer { ref label } => {
                 ExpTy {
                     exp: Exp::Name(label.clone()),
-                    ty: Type::Int,
+                    ty: Type::new_int(),
                 }
             },
             Expr::FunctionPointerCall { ref args, closure_name, ref function } => {
@@ -935,7 +990,12 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                 let (parameters, result) =
                     match function.ty {
-                        Type::Function { ref parameters, ref return_type, .. } => (parameters, return_type),
+                        Type::App(TypeConstructor::Arrow, ref types) => {
+                            match types.split_last() {
+                                Some((return_type, parameters)) => (parameters, return_type),
+                                None => (&[] as &[Type], &Type::new_unit()),
+                            }
+                        },
                         Type::Error => return EXP_TYPE_ERROR,
                         _ => return self.not_callable(&function.ty, pos),
                     };
@@ -974,8 +1034,8 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             (Some(else_expr), if_expr.ty)
                         },
                         None => {
-                            self.check_types(&Type::Unit, &if_expr.ty, then.pos);
-                            (None, Type::Unit)
+                            self.check_types(&Type::new_unit(), &if_expr.ty, then.pos);
+                            (None, Type::new_unit())
                         },
                     };
                 ExpTy {
@@ -986,7 +1046,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Int { value } =>
                 ExpTy {
                     exp: num(value),
-                    ty: Type::Int,
+                    ty: Type::new_int(),
                 },
             Expr::Let { ref body, ref declarations } => {
                 let old_in_loop = self.in_loop;
@@ -1010,12 +1070,13 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let this = self.trans_exp(this, level, done_label.clone(), true);
                 let methods =
                     match this.ty {
-                        Type::Class { ref methods, .. } => {
-                            methods
+                        Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+                            match **inner_type {
+                                TypeConstructor::Class { ref methods, .. } => methods,
+                                _ => return self.undefined_method(method.node, method.pos),
+                            }
                         },
-                        _ => {
-                            return self.undefined_method(method.node, method.pos)
-                        },
+                        _ => return self.undefined_method(method.node, method.pos),
                     };
 
                 for (index, class_method) in methods.iter().enumerate() {
@@ -1050,13 +1111,22 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::New { ref class_name } => {
                 // TODO: forbid calling new Object?
                 let class = self.get_type(class_name, AddError);
-                let (data_layout, fields, vtable_name) =
+                let data =
                     match class {
-                        Type::Class { ref data_layout, ref fields, ref vtable_name, .. } => {
-                            (self.gen.string_literal(data_layout.clone()), fields.clone(), vtable_name.clone())
+                        Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+                            match **inner_type {
+                                TypeConstructor::Class { ref data_layout, ref fields, ref vtable_name, .. } =>
+                                    Some((self.gen.string_literal(data_layout.clone()), fields.clone(), vtable_name.clone())),
+                                _ => None,
+                            }
                         },
-                        Type::Error => (Exp::Error, vec![], Label::new()),
-                        _ => {
+                        Type::Error => Some((Exp::Error, vec![], Label::new())),
+                        _ => None,
+                    };
+                let (data_layout, fields, vtable_name) =
+                    match data {
+                        Some(data) => data,
+                        None => {
                             self.add_error(Error::UnexpectedType {
                                 kind: "record".to_string(),
                                 pos: class_name.pos,
@@ -1104,7 +1174,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 let right = self.trans_exp(right, level, done_label, true);
                 self.check_types(&left.ty, &right.ty, right_pos);
                 let exp =
-                    if left.ty == Type::String && right.ty == Type::String {
+                    if left.ty == Type::new_string() && right.ty == Type::new_string() {
                         string_equality::<F>(oper, left.exp, right.exp) // FIXME: strings work with <, <=, > and >= ?
                     }
                     else {
@@ -1112,42 +1182,52 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     };
                 ExpTy {
                     exp,
-                    ty: Type::Int,
+                    ty: Type::new_int(),
                 }
             },
-            Expr::Record { ref fields, ref typ } => {
+            Expr::Record { ref fields, ref typ, ref type_args } => {
                 let ty = self.get_type(typ, AddError);
                 let mut field_exprs = vec![];
                 let data_layout =
                     match ty {
-                        Type::Record { ref data_layout, ref types, .. } => {
-                            for &(type_field_name, ref type_field) in types {
-                                let mut found = false;
-                                for field in fields {
-                                    if type_field_name == field.node.ident {
-                                        found = true;
-                                        let field_expr = self.trans_exp(&field.node.expr, level, done_label.clone(), true);
-                                        self.check_types(type_field, &field_expr.ty, field.node.expr.pos);
-                                        field_exprs.push(field_expr.exp);
+                        Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+                            match **inner_type {
+                                TypeConstructor::Record { ref data_layout, ref types, .. } => {
+                                    for &(type_field_name, ref type_field) in types {
+                                        let mut found = false;
+                                        for field in fields {
+                                            if type_field_name == field.node.ident {
+                                                found = true;
+                                                let field_expr = self.trans_exp(&field.node.expr, level, done_label.clone(), true);
+                                                self.check_types(type_field, &field_expr.ty, field.node.expr.pos);
+                                                field_exprs.push(field_expr.exp);
+                                            }
+                                        }
+                                        if !found {
+                                            return self.missing_field(type_field_name, typ);
+                                        }
                                     }
-                                }
-                                if !found {
-                                    return self.missing_field(type_field_name, typ);
-                                }
-                            }
 
-                            for field in fields {
-                                let found = types.iter()
-                                    .any(|&(type_field_name, _)| field.node.ident == type_field_name);
-                                if !found {
-                                    return self.extra_field(field, typ);
-                                }
-                            }
+                                    for field in fields {
+                                        let found = types.iter()
+                                            .any(|&(type_field_name, _)| field.node.ident == type_field_name);
+                                        if !found {
+                                            return self.extra_field(field, typ);
+                                        }
+                                    }
 
-                            data_layout.clone()
+                                    Some(data_layout.clone())
+                                },
+                                _ => None,
+                            }
                         },
-                        Type::Error => Exp::Error,
-                        _ => {
+                        Type::Error => Some(Exp::Error),
+                        _ => None,
+                    };
+                let data_layout =
+                    match data_layout {
+                        Some(layout) => layout,
+                        None => {
                             self.add_error(Error::UnexpectedType {
                                 kind: "record".to_string(),
                                 pos: typ.pos,
@@ -1189,21 +1269,25 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             Expr::Str { ref value } =>
                 ExpTy {
                     exp: self.gen.string_literal(value.clone()),
-                    ty: Type::String,
+                    ty: Type::new_string(),
                 },
             Expr::Subscript { ref expr, ref this } => {
                 let var = self.trans_exp(this, level, done_label.clone(), true);
                 let subscript_expr = self.trans_exp(expr, level, done_label, true);
                 self.check_int(&subscript_expr, expr.pos);
                 match var.ty {
-                    Type::Array(typ, _) => ExpTy {
-                        exp: array_subscript::<F>(var.exp, subscript_expr.exp),
-                        ty: self.actual_ty(&typ),
+                    Type::App(TypeConstructor::Unique(inner_type, _), types) => {
+                        match *inner_type {
+                            TypeConstructor::Array => {
+                                ExpTy {
+                                    exp: array_subscript::<F>(var.exp, subscript_expr.exp),
+                                    ty: self.actual_ty(&types[0]),
+                                }
+                            },
+                            _ => EXP_TYPE_ERROR,
+                        }
                     },
-                    Type::Error => ExpTy {
-                        exp: Exp::Error,
-                        ty: Type::Error,
-                    },
+                    Type::Error => EXP_TYPE_ERROR,
                     typ => {
                         self.add_error(Error::CannotIndex {
                             pos: this.pos,
@@ -1222,11 +1306,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         }
                     },
                     Some(Entry::ClassField { class }) => {
-                        let fields =
-                            match class {
-                                Type::Class { ref fields, .. } => fields,
-                                _ => unreachable!(),
-                            };
+                        let fields = get_class_fields(&class);
                         for (index, class_field) in fields.iter().enumerate() {
                             if class_field.name == ident.node {
                                 let this = self.trans_exp(&WithPos::dummy(Expr::Variable(WithPos::dummy(self.self_symbol))),
@@ -1254,21 +1334,19 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
 
                         let function_pointer_symbol = self.symbols.symbol(CLOSURE_FIELD);
 
-                        let types = vec![(function_pointer_symbol, Type::Int)];
+                        let types = vec![(function_pointer_symbol, Type::new_int())];
 
                         let closure_symbol = self.symbols.symbol(&format!("Closure{}", self.closure_index));
-                        let record_type = Type::Record {
+                        let record_type = Type::App(TypeConstructor::new_unique(TypeConstructor::Record {
                             data_layout,
                             name: closure_symbol,
                             types,
-                            unique: Unique::new(),
-                        };
+                        }), vec![]);
                         self.env.enter_type(closure_symbol, record_type.clone());
 
-                        let ty = Type::Function {
-                            parameters: parameters.clone(),
-                            return_type: Box::new(result.clone()),
-                        };
+                        let mut types = parameters.clone();
+                        types.push(result.clone());
+                        let ty = Type::App(TypeConstructor::Arrow, types);
 
                         self.closure_index += 1;
 
@@ -1282,6 +1360,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                         let closure = self.trans_exp(&WithPos::new(Expr::Record {
                             fields,
                             typ: WithPos::new(closure_symbol, pos),
+                            type_args: WithPos::dummy(TypeArgs::empty()),
                         }, pos), level, done_label, true);
                         ExpTy {
                             exp: closure.exp,
@@ -1291,7 +1370,12 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     Some(Entry::RecordField { record }) => {
                         let fields =
                             match record {
-                                Type::Record { ref types, .. } => types,
+                                Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+                                    match **inner_type {
+                                        TypeConstructor::Record { ref types, .. } => types,
+                                        _ => unreachable!(),
+                                    }
+                                },
                                 _ => unreachable!(),
                             };
                         for (index, &(name, ref typ)) in fields.iter().enumerate() {
@@ -1334,30 +1418,29 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     }
 
     fn trans_ty(&mut self, name: Symbol, ty: &TyWithPos) -> Type {
-        match ty.node {
-            Ty::Array { ref ident } => {
+        match ty.node.typ.node {
+            InnerType::Array { ref ident } => {
                 let ty = self.get_type(ident, AddError);
-                Type::Array(Box::new(ty), Unique::new())
+                // FIXME: according to the book, the Unique should be at the outermost.
+                Type::App(TypeConstructor::new_unique(TypeConstructor::Array), vec![ty])
             },
-            Ty::Function { ref parameters, ref return_type } => {
-                let parameters = parameters.iter()
+            InnerType::Function { ref parameters, ref return_type } => {
+                let parameters: Vec<_> = parameters.iter()
                     .map(|param| self.trans_ty(name, param))
                     .collect();
-                Type::Function {
-                    parameters,
-                    return_type: Box::new(self.trans_ty(name, return_type)),
-                }
+                let mut types = parameters;
+                types.push(self.trans_ty(name, return_type));
+                Type::App(TypeConstructor::Arrow, types)
             },
-            Ty::Name { ref ident } => self.get_type(ident, AddError),
-            Ty::Record { ref fields } => {
+            InnerType::Name { ref ident } => self.get_type(ident, AddError),
+            InnerType::Record { ref fields } => {
                 let mut types = vec![];
                 let mut data_layout = String::new();
                 for field in fields {
-                    let typ = self.get_type(&field.node.typ, AddError);
+                    let typ = self.trans_ty(name, &field.node.typ);
                     let is_pointer =
                         match typ {
-                            Type::Name(ref symbol, None) if symbol.node == name =>
-                                true,
+                            Type::Var(ref ty_var) if ty_var.0 == name => true,
                             _ => self.actual_ty(&typ).is_pointer(),
                         };
                     if is_pointer {
@@ -1369,20 +1452,19 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     types.push((field.node.name, typ));
                 }
                 let data_layout = self.gen.string_literal(data_layout);
-                Type::Record {
+                Type::App(TypeConstructor::new_unique(TypeConstructor::Record {
                     data_layout,
                     name,
                     types,
-                    unique: Unique::new(),
-                }
+                }), vec![])
             },
-            Ty::Unit => Type::Unit,
+            InnerType::Unit => Type::App(TypeConstructor::Unit, vec![]),
         }
     }
 
     fn array_contains_pointer(&mut self, ty: &Type) -> bool {
         match *ty {
-            Type::Array(ref typ, _) => typ.is_pointer(),
+            Type::App(TypeConstructor::Array, ref types) => types[0].is_pointer(),
             Type::Error => false,
             _ => ty.is_pointer()
         }
@@ -1400,29 +1482,34 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         let mut parent_data_layout = vec![];
         let mut parent_methods: Vec<ClassMethod> = vec![];
         let mut parent = self.get_type(class, DontAddError);
-        while let Type::Class { ref data_layout, ref fields, name, ref methods, ref parent_class, .. } = parent {
-            parent_fields.push(fields.clone());
-            parent_data_layout.push(data_layout.clone());
+        while let Type::App(TypeConstructor::Unique(inner_type, _), _) = parent {
+            match *inner_type {
+                TypeConstructor::Class { ref data_layout, ref fields, name, ref methods, ref parent_class, .. } => {
+                    parent_fields.push(fields.clone());
+                    parent_data_layout.push(data_layout.clone());
 
-            for method in methods {
-                if let Some(parent_method) = parent_methods.iter_mut().find(|parent_method| parent_method.name == method.name) {
-                    parent_method.label = method.label.clone();
-                }
-                else {
-                    parent_methods.push(ClassMethod {
-                        class_name: name,
-                        label: method.label.clone(),
-                        name: method.name.clone(),
-                        typ: method.typ.clone(),
-                    });
-                }
-            }
+                    for method in methods {
+                        if let Some(parent_method) = parent_methods.iter_mut().find(|parent_method| parent_method.name == method.name) {
+                            parent_method.label = method.label.clone();
+                        }
+                        else {
+                            parent_methods.push(ClassMethod {
+                                class_name: name,
+                                label: method.label.clone(),
+                                name: method.name.clone(),
+                                typ: method.typ.clone(),
+                            });
+                        }
+                    }
 
-            if let Some(ref parent_class) = *parent_class {
-                parent = self.get_type(parent_class, DontAddError);
-            }
-            else {
-                break;
+                    if let Some(ref parent_class) = *parent_class {
+                        parent = self.get_type(parent_class, DontAddError);
+                    }
+                    else {
+                        break;
+                    }
+                },
+                _ => break,
             }
         }
         let fields = parent_fields.into_iter().rev()
@@ -1432,6 +1519,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             .collect::<Vec<_>>()
             .join("");
         (fields, data_layout, parent_methods)
+    }
+
+    fn new_type_var(&mut self) -> TyVar {
+        TyVar::from_symbol(self.symbols.unnamed())
     }
 
     fn duplicate_param(&mut self, param: &FieldWithPos) {
@@ -1599,7 +1690,25 @@ fn find_closure_environment<F: Frame + PartialEq>(exp: &ExprWithPos, env: &Env<F
 
 fn type_is_collectable(typ: &Type) -> bool {
     match *typ {
-        Type::Array { .. } | Type::Class { .. } | Type::Function { .. } | Type::Record { .. } | Type::String => true,
+        Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+            match **inner_type {
+                TypeConstructor::Array { .. } | TypeConstructor::Class { .. } | TypeConstructor::Record { .. } => true,
+                _ => false,
+            }
+        },
+        Type::App(TypeConstructor::Arrow | TypeConstructor::String, _) => true,
         _ => false,
+    }
+}
+
+fn get_class_fields(typ: &Type) -> &[ClassField] {
+    match *typ {
+        Type::App(TypeConstructor::Unique(ref inner_type, _), _) => {
+            match **inner_type {
+                TypeConstructor::Class { ref fields, .. } => fields,
+                _ => unreachable!(),
+            }
+        },
+        _ => unreachable!(),
     }
 }
