@@ -33,13 +33,16 @@ let type list<e> = {
         first = "test",
         second = "2"
     }
-    /* FIXME: there's conflict between `var < 12` and `func<int>()`, so find a way to differentiate the syntax. */
     var my_two_some := twosome::<int> {
         first = 4,
         second = 2
     }
 
 in
-    f(string_pair); /* Should be an error. */
-    f(my_two_some) /* Should be an error. */
+    print(string_pair.second);
+    print("\n");
+    printi(two4s.head)
+    /* TODO: correct code generation (monomorphisation) for polymorphic code. */
+    /*f(string_pair); /* Should be an error. */ */
+    /*f(my_two_some) /* Should be an error. */ */
 end

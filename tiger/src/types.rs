@@ -57,7 +57,7 @@ pub struct ClassMethod {
     pub typ: FunctionType,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TyVar(pub Symbol);
 
 impl TyVar {
