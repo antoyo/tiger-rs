@@ -127,6 +127,14 @@ impl<F: Clone + Frame> Env<F> {
         self.var_env.end_scope();
     }
 
+    pub fn begin_type_scope(&mut self) {
+        self.type_env.begin_scope();
+    }
+
+    pub fn end_type_scope(&mut self) {
+        self.type_env.end_scope();
+    }
+
     pub fn enter_escape(&mut self, symbol: Symbol, escape: bool) {
         self.escape_env.enter(symbol, DepthEscape {
             depth: 0, // This value is not used anymore.

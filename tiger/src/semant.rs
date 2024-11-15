@@ -596,8 +596,22 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.env.enter_type(name.node, Type::Var(TyVar::from_symbol(name.node)));
                 }
 
-                for &WithPos { node: TypeDec { ref name, ref ty, .. }, .. } in type_declarations {
+                for &WithPos { node: TypeDec { ref name, ref ty, ref ty_vars, .. }, .. } in type_declarations {
+                    let has_type_args = !ty_vars.idents.is_empty();
+                    if has_type_args {
+                        self.env.begin_type_scope();
+                    }
+                    let mut type_vars = vec![];
+                    for var in &ty_vars.idents {
+                        let type_var = self.new_type_var();
+                        type_vars.push(type_var);
+                        self.env.enter_type(var.node, Type::Var(type_var));
+                    }
+
                     let new_type = self.trans_ty(name.node, ty);
+                    if has_type_args {
+                        self.env.end_type_scope();
+                    }
                     self.env.enter_type(name.node, new_type);
                 }
                 None
@@ -1407,6 +1421,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
         match ty.node.typ.node {
             InnerType::Array { ref ident } => {
                 let ty = self.get_type(ident, AddError);
+                // FIXME: according to the book, the Unique should be at the outermost.
                 Type::App(TypeConstructor::new_unique(TypeConstructor::Array), vec![ty])
             },
             InnerType::Function { ref parameters, ref return_type } => {
@@ -1504,6 +1519,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
             .collect::<Vec<_>>()
             .join("");
         (fields, data_layout, parent_methods)
+    }
+
+    fn new_type_var(&mut self) -> TyVar {
+        TyVar::from_symbol(self.symbols.unnamed())
     }
 
     fn duplicate_param(&mut self, param: &FieldWithPos) {
