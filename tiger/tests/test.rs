@@ -83,6 +83,8 @@ fn test_execution() {
         if output != expected_output {
             success = false;
             println!(" FAIL");
+            println!("Expected: {}", expected_output);
+            println!("Actual: {}\n====================", output);
             failure_count += 1;
         }
         else {
