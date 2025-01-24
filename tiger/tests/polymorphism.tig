@@ -3,6 +3,12 @@ let type list<e> = {
     tail: list<e>
 }
 
+    type MyStruct = {
+        a: int,
+        b: int,
+        c: int
+    }
+
     function append<e>(a: list<e>, b: list<e>): list<e> =
         if a = nil then
             b
@@ -37,11 +43,32 @@ let type list<e> = {
         first = 4,
         second = 2
     }
+    var struct_pair := pair::<MyStruct> {
+        first = MyStruct {
+            a = 1,
+            b = 2,
+            c = 3
+        },
+        second = MyStruct {
+            a = 4,
+            b = 5,
+            c = 6
+        }
+    }
+    /* FIXME: this doesn't parse: */
+    /*var nested_list := list<list<int>> {
+        head = two4s,
+        tail = nil
+    }*/
 
 in
     print(string_pair.second);
     print("\n");
-    printi(two4s.head)
+    printi(two4s.head);
+    let var second := struct_pair.second
+    in
+        printi(second.c)
+    end
     /* TODO: correct code generation (monomorphisation) for polymorphic code. */
     /*f(string_pair); /* Should be an error. */ */
     /*f(my_two_some) /* Should be an error. */ */

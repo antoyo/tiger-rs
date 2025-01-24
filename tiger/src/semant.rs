@@ -181,8 +181,11 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     fn actual_ty(&self, typ: &Type) -> Type {
         match *typ {
             Type::Var(ref type_var) => {
+                println!("1: {:?}: {}", typ, self.symbols.name(type_var.0));
                 if let Some(actual_type) = self.env.look_type(type_var.0) {
+                    println!("2");
                     if typ != actual_type {
+                        println!("3");
                         return self.actual_ty(actual_type);
                     }
                 }
@@ -959,10 +962,16 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                 }
                                 self.unexpected_field(ident, ident.pos, record_type)
                             },
-                            _ => EXP_TYPE_ERROR,
+                            _ => {
+                                panic!();
+                                EXP_TYPE_ERROR
+                            },
                         }
                     },
-                    Type::Error => EXP_TYPE_ERROR,
+                    Type::Error => {
+                        panic!();
+                        EXP_TYPE_ERROR
+                    },
                     typ => {
                         self.add_error(Error::NotARecordOrClass {
                             pos: this.pos,
@@ -1284,7 +1293,10 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                                     ty: self.actual_ty(&types[0]),
                                 }
                             },
-                            _ => EXP_TYPE_ERROR,
+                            _ => {
+                                panic!();
+                                EXP_TYPE_ERROR
+                            },
                         }
                     },
                     Type::Error => EXP_TYPE_ERROR,

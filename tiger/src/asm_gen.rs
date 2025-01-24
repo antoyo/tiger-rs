@@ -98,7 +98,7 @@ impl<F: Frame> Gen<F> {
             // Error cases:
             Exp::Error | Exp::ExpSequence(_, _) | Exp::BinOp { left: box Exp::Error, .. }
                 | Exp::BinOp { right: box Exp::Error, .. } | Exp::BinOp { right: box Exp::Name(_), .. }
-                => unreachable!(),
+                => unreachable!("{:?}", expr),
 
             Exp::BinOp { op: BinOp::Plus, left: box Exp::Name(label), right } => {
                 let instruction = Instruction::Move {
