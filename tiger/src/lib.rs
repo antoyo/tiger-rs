@@ -52,13 +52,13 @@ const WORD_SIZE: usize = 8;
 }*/
 
 #[no_mangle]
-extern fn ord(string: *const c_char) -> i64 {
+extern "C" fn ord(string: *const c_char) -> i64 {
     let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
     cstring.to_str().expect("cstr to_str").chars().next().expect("ord string is empty") as i64
 }
 
 #[no_mangle]
-extern fn chr(num: i64) -> *const c_char {
+extern "C" fn chr(num: i64) -> *const c_char {
     let char = num as u8;
     let ptr = GARBAGE_COLLECTOR.with(|collector| {
         collector.borrow_mut().allocate(Layout::String(1))
@@ -74,7 +74,7 @@ extern fn chr(num: i64) -> *const c_char {
 }
 
 #[no_mangle]
-extern fn getchar() -> *const c_char {
+extern "C" fn getchar() -> *const c_char {
     let stdin = stdin();
     let char = stdin.bytes().next().expect("next char").expect("read stdin") as char;
 
@@ -92,7 +92,7 @@ extern fn getchar() -> *const c_char {
 }
 
 #[no_mangle]
-extern fn getcharP(continuation: *const c_void) {
+extern "C" fn getcharP(continuation: *const c_void) {
     let char = getchar();
     unsafe {
         let function: fn(*const c_char) = mem::transmute(get_function_pointer(continuation));
@@ -101,7 +101,7 @@ extern fn getcharP(continuation: *const c_void) {
 }
 
 #[no_mangle]
-extern fn concat(string1: *const c_char, string2: *const c_char) -> *const c_char {
+extern "C" fn concat(string1: *const c_char, string2: *const c_char) -> *const c_char {
     let cstring1 = unsafe { CStr::from_ptr(string_offset(string1)) };
     let cstring2 = unsafe { CStr::from_ptr(string_offset(string2)) };
     let mut string1 = cstring1.to_str().expect("to_str").to_string();
@@ -125,35 +125,35 @@ extern fn concat(string1: *const c_char, string2: *const c_char) -> *const c_cha
 }
 
 #[no_mangle]
-extern fn stringEqual(string1: *const c_char, string2: *const c_char) -> i64 {
+extern "C" fn stringEqual(string1: *const c_char, string2: *const c_char) -> i64 {
     let cstring1 = unsafe { CStr::from_ptr(string_offset(string1)) };
     let cstring2 = unsafe { CStr::from_ptr(string_offset(string2)) };
     (cstring1 == cstring2) as i64
 }
 
 #[no_mangle]
-extern fn allocClass(data_layout: *const c_char) -> i64 {
+extern "C" fn allocClass(data_layout: *const c_char) -> i64 {
     GARBAGE_COLLECTOR.with(|collector| {
         collector.borrow_mut().allocate(Layout::Class(data_layout))
     })
 }
 
 #[no_mangle]
-extern fn allocRecord(data_layout: *const c_char) -> i64 {
+extern "C" fn allocRecord(data_layout: *const c_char) -> i64 {
     GARBAGE_COLLECTOR.with(|collector| {
         collector.borrow_mut().allocate(Layout::Record(data_layout))
     })
 }
 
 #[no_mangle]
-extern fn initArray(length: usize, is_pointer: i64) -> i64 {
+extern "C" fn initArray(length: usize, is_pointer: i64) -> i64 {
     GARBAGE_COLLECTOR.with(|collector| {
         collector.borrow_mut().allocate(Layout::Array(length, is_pointer != 0))
     })
 }
 
 #[no_mangle]
-extern fn print(string: *const c_char) {
+extern "C" fn print(string: *const c_char) {
     let cstring = unsafe { CStr::from_ptr(string_offset(string)) };
     if let Ok(string) = cstring.to_str() {
         print!("{}", string);
@@ -162,14 +162,14 @@ extern fn print(string: *const c_char) {
 }
 
 #[no_mangle]
-extern fn printP(string: *const c_char, continuation: *const c_void) {
+extern "C" fn printP(string: *const c_char, continuation: *const c_void) {
     print(string);
     let function = get_function_pointer(continuation);
     function();
 }
 
 #[no_mangle]
-extern fn printi(num: i32) {
+extern "C" fn printi(num: i32) {
     println!("{}", num);
 }
 
