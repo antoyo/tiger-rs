@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 Boucher, Antoni <bouanto@zoho.com>
+ * Copyright (c) 2017-2024 Boucher, Antoni <bouanto@zoho.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -59,6 +59,8 @@ use position::{Pos, WithPos};
 use symbol::{Symbols, SymbolWithPos};
 use token::{Tok, Token};
 use token::Tok::*;
+
+use crate::ast::{InnerType, TypeArgs, TypeArgsWithPos, TypeVars};
 
 macro_rules! eat {
     ($_self:ident, $pat:ident, $var:ident) => {
@@ -163,9 +165,9 @@ impl<'a, R: Read> Parser<'a, R> {
         let type_name;
         let type_pos = eat!(self, Ident, type_name);
         let ident = self.symbols.symbol(&type_name);
-        Ok(WithPos::new(Ty::Array {
+        Ok(WithPos::new(Ty::new(WithPos::new(InnerType::Array {
             ident: WithPos::new(ident, type_pos),
-        }, pos))
+        }, pos)), pos))
     }
 
     fn break_(&mut self) -> Result<ExprWithPos> {
@@ -198,6 +200,7 @@ impl<'a, R: Read> Parser<'a, R> {
             expr = WithPos::new(Expr::Call {
                 args,
                 function: Box::new(expr),
+                type_args: WithPos::dummy(TypeArgs::empty()),
             }, pos.grow(end_pos));
         }
         Ok(expr)
@@ -207,18 +210,28 @@ impl<'a, R: Read> Parser<'a, R> {
         let name;
         let pos = eat!(self, Ident, name);
         let symbol = self.symbols.symbol(&name);
+        let type_args =
+            match self.peek()?.token {
+                ColonColon => self.ty_args()?,
+                _ => {
+                    WithPos::new(TypeArgs {
+                        types: vec![],
+                    }, Pos::dummy())
+                },
+            };
         if let OpenParen = self.peek()?.token {
             let (args, end_pos) = self.call_args()?;
             let call = WithPos::new(Expr::Call {
                 args,
                 function: Box::new(WithPos::new(Expr::Variable(WithPos::new(symbol, pos)), pos)),
+                type_args,
             }, pos.grow(end_pos));
             let call = self.more_calls(call)?;
             Ok(call)
         }
         else {
             match self.peek()?.token {
-                OpenCurly => self.rec_create(WithPos::new(symbol, pos), pos),
+                OpenCurly => self.rec_create(WithPos::new(symbol, pos), type_args, pos),
                 _ => {
                     let var = WithPos::new(Expr::Variable(WithPos::new(symbol, pos)), pos);
                     self.lvalue_or_assign(var)
@@ -296,13 +309,11 @@ impl<'a, R: Read> Parser<'a, R> {
         let pos = eat!(self, Ident, field_name);
         let name = self.symbols.symbol(&field_name);
         eat!(self, Colon);
-        let type_name;
-        let type_pos = eat!(self, Ident, type_name);
-        let typ = self.symbols.symbol(&type_name);
+        let typ = self.ty()?;
         Ok(WithPos::new(Field {
             escape: false,
             name,
-            typ: WithPos::new(typ, type_pos),
+            typ,
         }, pos))
     }
 
@@ -452,6 +463,7 @@ impl<'a, R: Read> Parser<'a, R> {
         let func_name;
         let name_pos = eat!(self, Ident, func_name);
         let name = WithPos::new(self.symbols.symbol(&func_name), name_pos);
+        let ty_vars = self.ty_vars()?;
         eat!(self, OpenParen);
         let params = fields!(self, CloseParen);
         eat!(self, CloseParen);
@@ -464,6 +476,7 @@ impl<'a, R: Read> Parser<'a, R> {
             params,
             pure,
             result,
+            ty_vars,
         }, pos))
     }
 
@@ -625,14 +638,12 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(WithPos::new(Expr::Nil, pos))
     }
 
-    fn optional_type(&mut self) -> Result<Option<SymbolWithPos>> {
+    fn optional_type(&mut self) -> Result<Option<TyWithPos>> {
         let mut typ = None;
         if let Colon = self.peek()?.token {
             eat!(self, Colon);
-            let type_name;
-            let pos = eat!(self, Ident, type_name);
-            let ident = self.symbols.symbol(&type_name);
-            typ = Some(WithPos::new(ident, pos));
+            let return_type = self.ty()?;
+            typ = Some(return_type);
         }
         Ok(typ)
     }
@@ -655,7 +666,7 @@ impl<'a, R: Read> Parser<'a, R> {
         }
     }
 
-    fn rec_create(&mut self, typ: SymbolWithPos, pos: Pos) -> Result<ExprWithPos> {
+    fn rec_create(&mut self, typ: SymbolWithPos, type_args: TypeArgsWithPos, pos: Pos) -> Result<ExprWithPos> {
         eat!(self, OpenCurly);
         let field = self.field_create()?;
         let mut fields = vec![field];
@@ -668,6 +679,7 @@ impl<'a, R: Read> Parser<'a, R> {
         Ok(WithPos::new(Expr::Record {
             fields,
             typ,
+            type_args,
         }, pos))
     }
 
@@ -676,9 +688,9 @@ impl<'a, R: Read> Parser<'a, R> {
         let fields = fields!(self, CloseCurly);
         let end_pos = eat!(self, CloseCurly);
         let pos = pos.grow(end_pos);
-        Ok(WithPos::new(Ty::Record {
+        Ok(WithPos::new(Ty::new(WithPos::new(InnerType::Record {
             fields,
-        }, pos))
+        }, pos)), pos))
     }
 
     fn relational_expr(&mut self) -> Result<ExprWithPos> {
@@ -741,19 +753,129 @@ impl<'a, R: Read> Parser<'a, R> {
 
     fn ty(&mut self) -> Result<TyWithPos> {
         match self.peek()?.token {
-            Array => self.arr_ty(),
-            OpenCurly => self.rec_ty(),
-            OpenParen => self.unit_ty(),
             Ident(_) => {
                 let type_name;
                 let pos = eat!(self, Ident, type_name);
                 let ident = self.symbols.symbol(&type_name);
-                Ok(WithPos::new(Ty::Name {
+                let mut ty = WithPos::new(Ty::new(WithPos::new(InnerType::Name {
                     ident: WithPos::new(ident, pos),
-                }, pos))
+                }, pos)), pos);
+                match self.peek()?.token {
+                    Arrow => {
+                        eat!(self, Arrow);
+                        let return_type = self.ty()?;
+                        let pos = pos.grow(return_type.pos);
+                        ty = WithPos::new(Ty::new(WithPos::new(InnerType::Function {
+                            parameters: vec![ty],
+                            return_type: Box::new(return_type),
+                        }, pos)), pos);
+                    },
+                    Lesser => {
+                        let args = self.inner_type_args()?;
+                        let pos = pos.grow(args.pos);
+                        ty.pos = pos;
+                        ty.node.args = args;
+                        return Ok(ty);
+                    },
+                    _ => (),
+                }
+                Ok(ty)
+            },
+            OpenParen => {
+                let pos = eat!(self, OpenParen);
+
+                let mut parameters = vec![];
+                loop {
+                    if let CloseParen = self.peek()?.token {
+                        break;
+                    }
+                    let param = self.ty()?;
+                    parameters.push(param);
+                    match self.peek()?.token {
+                        Comma => { self.token()?; },
+                        _ => break,
+                    }
+                }
+                let close_paren_pos = eat!(self, CloseParen);
+
+                match self.peek()?.token {
+                    Arrow => {
+                        eat!(self, Arrow);
+                        let return_type = self.ty()?;
+                        let pos = pos.grow(return_type.pos);
+                        Ok(WithPos::new(Ty::new(WithPos::new(InnerType::Function {
+                            parameters,
+                            return_type: Box::new(return_type),
+                        }, pos)), pos))
+                    },
+                    _ => {
+                        if parameters.is_empty() {
+                            let pos = pos.grow(close_paren_pos);
+                            Ok(WithPos::new(Ty::new(WithPos::new(InnerType::Unit, pos)), pos))
+                        }
+                        else {
+                            // TODO: error out.
+                            panic!();
+                        }
+                    }
+                }
+            },
+            Poly => {
+                unimplemented!();
             },
             _ => Err(self.unexpected_token("array, { or identifier")?),
         }
+    }
+
+    fn ty_vars(&mut self) -> Result<TypeVars> {
+        let mut idents = vec![];
+        if let Lesser = self.peek()?.token {
+            eat!(self, Lesser);
+            loop {
+                if let Greater = self.peek()?.token {
+                    break;
+                }
+                let name;
+                let ident_pos = eat!(self, Ident, name);
+                idents.push(WithPos::new(self.symbols.symbol(&name), ident_pos));
+                match self.peek()?.token {
+                    Comma => { self.token()?; },
+                    _ => break,
+                }
+            }
+            eat!(self, Greater);
+        }
+        Ok(TypeVars {
+            idents,
+        })
+    }
+
+    fn ty_args(&mut self) -> Result<TypeArgsWithPos> {
+        let pos = eat!(self, ColonColon);
+        let mut args = self.inner_type_args()?;
+        args.pos = pos.grow(args.pos);
+        Ok(args)
+    }
+
+    fn inner_type_args(&mut self) -> Result<TypeArgsWithPos> {
+        let mut types = vec![];
+        let pos = eat!(self, Lesser);
+        loop {
+            if let Greater = self.peek()?.token {
+                break;
+            }
+            let ty = self.ty()?;
+            types.push(ty);
+            match self.peek()?.token {
+                Comma => { self.token()?; },
+                _ => break,
+            }
+        }
+        let end_pos = eat!(self, Greater);
+        let pos = pos.grow(end_pos);
+        Ok(WithPos::new(TypeArgs {
+            types,
+        }, pos))
     }
 
     fn ty_decs(&mut self) -> Result<DeclarationWithPos> {
@@ -771,51 +893,20 @@ impl<'a, R: Read> Parser<'a, R> {
         let type_name;
         let name_pos = eat!(self, Ident, type_name);
         let name = WithPos::new(self.symbols.symbol(&type_name), name_pos);
+        let ty_vars = self.ty_vars()?;
         eat!(self, Equal);
-        if let OpenParen = self.peek()?.token {
-            let pos = eat!(self, OpenParen);
-            let mut parameters = vec![];
-            loop {
-                if let CloseParen = self.peek()?.token {
-                    break;
-                }
-                let param = self.ty()?;
-                parameters.push(param);
-                match self.peek()?.token {
-                    Comma => { self.token()?; },
-                    _ => break,
-                }
-            }
-            eat!(self, CloseParen);
-
-            eat!(self, Arrow);
-            let return_type = self.ty()?;
-            let pos = pos.grow(return_type.pos);
-            let ty = WithPos::new(Ty::Function {
-                parameters,
-                return_type: Box::new(return_type),
-            }, pos);
-            Ok(WithPos::new(TypeDec {
-                name,
-                ty,
-            }, pos))
-        }
-        else {
-            let mut ty = self.ty()?;
-            if let Arrow = self.peek()?.token {
-                eat!(self, Arrow);
-                let return_type = self.ty()?;
-                let pos = ty.pos.grow(return_type.pos);
-                ty = WithPos::new(Ty::Function {
-                    parameters: vec![ty],
-                    return_type: Box::new(return_type),
-                }, pos);
-            }
-            Ok(WithPos::new(TypeDec {
-                name,
-                ty,
-            }, dec_pos))
-        }
+        let ty =
+            match self.peek()?.token {
+                Array => self.arr_ty(),
+                OpenCurly => self.rec_ty(),
+                _ => self.ty(),
+            }?;
+        let pos = dec_pos.grow(ty.pos);
+        Ok(WithPos::new(TypeDec {
+            name,
+            ty,
+            ty_vars,
+        }, pos))
     }
 
     fn unary_expr(&mut self) -> Result<ExprWithPos> {
@@ -834,12 +925,6 @@ impl<'a, R: Read> Parser<'a, R> {
             },
             _ => self.primary_expr(),
         }
-    }
-
-    fn unit_ty(&mut self) -> Result<TyWithPos> {
-        let pos = eat!(self, OpenParen);
-        let end_pos = eat!(self, CloseParen);
-        Ok(WithPos::new(Ty::Unit, pos.grow(end_pos)))
     }
 
     fn var_dec(&mut self) -> Result<DeclarationWithPos> {
