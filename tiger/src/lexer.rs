@@ -70,7 +70,7 @@ impl<R: Read> Lexer<R> {
     }
 
     fn colon_and_optional_equal(&mut self) -> Result<Token> {
-        self.two_char_token(vec![('=', ColonEqual)], Colon)
+        self.two_char_token(vec![('=', ColonEqual), (':', ColonColon)], Colon)
     }
 
     fn comment(&mut self) -> Result<()> {
@@ -189,6 +189,7 @@ impl<R: Read> Lexer<R> {
                 "new" => New,
                 "nil" => Nil,
                 "of" => Of,
+                "poly" => Poly,
                 "pure" => Pure,
                 "then" => Then,
                 "to" => To,

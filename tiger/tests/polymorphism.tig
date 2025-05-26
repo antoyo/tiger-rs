@@ -1,0 +1,78 @@
+let type list<e> = {
+    head: e,
+    tail: list<e>
+}
+
+    type MyStruct = {
+        a: int,
+        b: int,
+        c: int
+    }
+
+    function append<e>(a: list<e>, b: list<e>): list<e> =
+        if a = nil then
+            b
+        else
+            list::<e> {
+                head = a.head,
+                tail = append::<e>(a.tail, b)
+            }
+
+    var one4: list<int> := list::<int> {
+        head = 4,
+        tail = nil
+    }
+    var two4s: list<int> := append::<int>(one4, one4)
+
+    type pair<a> = {
+        first: a,
+        second: a
+    }
+    type twosome<a> = {
+        first: a,
+        second: a
+    }
+
+    function f(a: pair<int>): pair<int> = a
+
+    var string_pair := pair::<string> {
+        first = "test",
+        second = "2"
+    }
+    var my_two_some := twosome::<int> {
+        first = 4,
+        second = 2
+    }
+    var struct_pair := pair::<MyStruct> {
+        first = MyStruct {
+            a = 1,
+            b = 2,
+            c = 3
+        },
+        second = MyStruct {
+            a = 4,
+            b = 5,
+            c = 6
+        }
+    }
+    /* FIXME: this doesn't parse: */
+    /*var nested_list := list<list<int>> {
+        head = two4s,
+        tail = nil
+    }*/
+
+in
+    print(string_pair.second);
+    print("\n");
+    printi(two4s.head);
+    /* FIXME: second get the type `a` declared in the type `pair`. It should be resolved to its actual type. */
+    let var second := struct_pair.second
+    in
+        printi(second.c) /* FIXME: this line causes the panic.
+            Maybe this is because the type of second is not the correct one.
+            */
+    end
+    /* TODO: correct code generation (monomorphisation) for polymorphic code. */
+    /*f(string_pair); /* Should be an error. */ */
+    /*f(my_two_some) /* Should be an error. */ */
+end
