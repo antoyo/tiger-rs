@@ -181,11 +181,11 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
     fn actual_ty(&self, typ: &Type) -> Type {
         match *typ {
             Type::Var(ref type_var) => {
-                println!("1: {:?}: {}", typ, self.symbols.name(type_var.0));
+                //println!("1: {:?}: {}", typ, self.symbols.name(type_var.0));
                 if let Some(actual_type) = self.env.look_type(type_var.0) {
-                    println!("2");
+                    //println!("2");
                     if typ != actual_type {
-                        println!("3");
+                        //println!("3");
                         return self.actual_ty(actual_type);
                     }
                 }
@@ -600,6 +600,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
 
                 for &WithPos { node: TypeDec { ref name, ref ty, ref ty_vars, .. }, .. } in type_declarations {
+                    println!("======\nType declaration name: {}", self.symbols.name(name.node));
                     let has_type_args = !ty_vars.idents.is_empty();
                     if has_type_args {
                         self.env.begin_type_scope();
@@ -620,6 +621,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 None
             },
             Declaration::VariableDeclaration { ref init, name, ref typ, .. } => {
+                println!("********\nVar {}", self.symbols.name(name));
                 let exp = self.trans_exp(init, parent_level, done_label, true);
                 let is_collectable = type_is_collectable(&exp.ty);
                 let escape = self.env.look_escape(name);
@@ -641,6 +643,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                     self.add_error(Error::RecordType { pos: declaration.pos });
                     return None;
                 }
+                println!("===> ({}) Type: {:?}", self.symbols.name(name), exp.ty);
                 let var = var_dec(&access, exp.exp);
                 self.env.enter_var(name, Entry::Var { access, typ: exp.ty });
                 Some(var)
@@ -727,6 +730,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             },
             Expr::Call { ref args, ref function, ref type_args } => {
+                // TODO: use type_args.
                 match function.node {
                     Expr::Variable(ref func) => {
                         match self.env.look_var(func.node).cloned() { // TODO: remove this clone.
@@ -936,6 +940,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 EXP_TYPE_ERROR
             },
             Expr::Field { ref ident, ref this } => {
+                println!(" | Field {:?}.{:?}", this.node, self.symbols.name(ident.node));
                 let var = self.trans_exp(this, level, done_label, true);
                 match var.ty {
                     Type::App(TypeConstructor::Unique(inner_type, _), _) => {
@@ -954,6 +959,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                             TypeConstructor::Record { name: record_type, ref types, .. } => {
                                 for (index, &(name, ref typ)) in types.iter().enumerate() {
                                     if name == ident.node {
+                                        println!("Record field: {}: {:?}", self.symbols.name(name), typ);
                                         return ExpTy {
                                             exp: field_access::<F>(var.exp, index, FieldType::Record),
                                             ty: typ.clone(),
@@ -1195,6 +1201,7 @@ impl<'a, F: Clone + Debug + Frame + PartialEq> SemanticAnalyzer<'a, F> {
                 }
             },
             Expr::Record { ref fields, ref typ, ref type_args } => {
+                // TODO: use type_args to replace the generic types in the record type.
                 let ty = self.get_type(typ, AddError);
                 let mut field_exprs = vec![];
                 let data_layout =

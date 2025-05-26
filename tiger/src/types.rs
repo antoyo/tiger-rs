@@ -62,6 +62,9 @@ pub struct TyVar(pub Symbol);
 
 impl TyVar {
     pub fn from_symbol(symbol: Symbol) -> Self {
+        if symbol == 78 {
+            println!("****************************************************************************************************\nHERE");
+        }
         Self(symbol)
     }
 }

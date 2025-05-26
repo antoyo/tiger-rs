@@ -221,6 +221,7 @@ pub type InnerTypeWithPos = WithPos<InnerType>;
 pub struct TypeDec {
     pub name: SymbolWithPos,
     pub ty: TyWithPos,
+    /// Generic types.
     pub ty_vars: TypeVars,
 }
 
